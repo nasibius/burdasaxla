@@ -29,7 +29,10 @@ with sync_playwright() as p:
     page.get_by_role('button', name='AYNA Planning', exact=True).click()
     expect(page.locator('.authority-warning')).to_contain_text('Verified supply inventory incomplete — coverage cannot be established')
     expect(page.get_by_text('Read-only demonstration', exact=True)).to_be_visible()
-    assert page.locator('.authority-map .leaflet-control-layers-overlays label').count() == 4
+    overlays = page.locator('.authority-map .leaflet-control-layers-overlays label')
+    assert overlays.count() == 6
+    labels = [overlays.nth(i).inner_text().strip() for i in range(overlays.count())]
+    assert 'Analysed access points (proxies)' in labels and 'Measured passenger activity' in labels
     count = page.locator('.authority-card').count()
     assert count > 0
     page.locator('.authority-card').first.click()

@@ -13,6 +13,8 @@ function Focus({ candidate }: { candidate?: Candidate }) {
   useEffect(() => { if (candidate) map.fitBounds(candidate.geometry.coordinates.map(ll), { maxZoom: 18, padding: [60, 60], animate: false }); }, [candidate, map]);
   return null;
 }
+const COVERAGE_COLOR: Record<string, string> = { SERVED: '#2fd581', POTENTIAL_COVERAGE_GAP: '#ff7a45', INVENTORY_UNKNOWN: '#94a3b8', NETWORK_UNRELIABLE: '#64748b' };
+
 export default function AuthorityPanel({ lang, theme, segments }: { lang: Lang; theme: 'dark' | 'light'; segments: SegFeature[] }) {
   const az = lang === 'az';
   const t = (en: string, translated: string) => az ? translated : en;
@@ -33,6 +35,7 @@ export default function AuthorityPanel({ lang, theme, segments }: { lang: Lang; 
   }, [threshold, refresh]);
   const rows = useMemo(() => data?.candidates.filter(c => !filter || c.review_status === filter) ?? [], [data, filter]);
   const candidate = rows.find(c => c.candidate_id === selected);
+  const maxActivity = useMemo(() => Math.max(1, ...(data?.passenger_activity ?? []).map(r => r.passengers_per_hour)), [data]);
   const activity = useMemo(() => (data?.passenger_activity ?? []).filter(r => `${r.name} ${r.source_ref}`.toLowerCase().includes(activityFilter.toLowerCase()))
     .sort((a, b) => Number(b[sort as keyof typeof b]) - Number(a[sort as keyof typeof a]) || a.location_id.localeCompare(b.location_id)), [data, activityFilter, sort]);
   const pick = (c: Candidate) => { setSelected(c.candidate_id); setAction(c.review_status); setReason(''); setNotice(''); };
@@ -89,11 +92,13 @@ export default function AuthorityPanel({ lang, theme, segments }: { lang: Lang; 
             <LayersControl.Overlay name={t('Current curb restrictions', 'Cari bordür məhdudiyyətləri')}><GeoJSON key={segments.length} data={{ type: 'FeatureCollection', features: segments } as any} style={f => ({ color: f?.properties.status === 'PROHIBITED' ? '#ef596f' : f?.properties.status === 'ALLOWED' ? '#2fd581' : '#d5a735', weight: 2 })} /></LayersControl.Overlay>
             <LayersControl.Overlay checked name={t('Verified official records', 'Təsdiqli rəsmi qeydlər')}><LayerGroup>{data.verified_locations.map(z => <GeoJSON key={z.id} data={z.geometry} style={{ color: '#31bcd2', weight: 7 }}><Tooltip>{t('Verified official record', 'Təsdiqli rəsmi qeyd')} #{z.id} · {z.verified_at ?? 'unknown'}</Tooltip></GeoJSON>)}</LayerGroup></LayersControl.Overlay>
             <LayersControl.Overlay checked name={t('Information gaps / survey tasks', 'Məlumat boşluğu / yoxlama tapşırıqları')}><LayerGroup>{rows.map(c => <Polyline key={c.candidate_id} positions={c.geometry.coordinates.map(ll)} pathOptions={{ color: c.candidate_id === selected ? '#c2a2ff' : '#8995a9', weight: c.candidate_id === selected ? 9 : 5, dashArray: '6 5' }} eventHandlers={{ click: () => pick(c) }}><Tooltip sticky>{c.is_synthetic_example ? 'SIMULATED EXAMPLE · ' : ''}{c.display_order}. {c.name} · {t('Survey only · not legal permission', 'Yalnız yoxlama · hüquqi icazə deyil')}</Tooltip></Polyline>)}</LayerGroup></LayersControl.Overlay>
+            <LayersControl.Overlay name={t('Analysed access points (proxies)', 'Təhlil edilən giriş nöqtələri (proksi)')}><LayerGroup>{(data.coverage ?? []).map(n => <CircleMarker key={n.id} center={ll(n.geometry.coordinates)} radius={3} pathOptions={{ color: COVERAGE_COLOR[n.state], fillColor: COVERAGE_COLOR[n.state], fillOpacity: 0.85, weight: 1 }}><Tooltip>{n.name} · {n.state}{n.distance_m != null ? ` · ${n.distance_m} m` : ''} · {t('proxy, not demand', 'proksi, tələb deyil')}</Tooltip></CircleMarker>)}</LayerGroup></LayersControl.Overlay>
+            <LayersControl.Overlay checked name={t('Measured passenger activity', 'Ölçülmüş sərnişin axını')}><LayerGroup>{(data.passenger_activity ?? []).map(r => <CircleMarker key={r.id} center={[r.latitude, r.longitude]} radius={6 + 14 * Math.sqrt(r.passengers_per_hour / maxActivity)} pathOptions={{ color: '#38bdf8', fillColor: '#38bdf8', fillOpacity: 0.25, weight: 2 }}><Tooltip>{r.name} · ↑{r.pickups} ↓{r.dropoffs} · {r.passengers_per_hour}/h · {r.source_ref}</Tooltip></CircleMarker>)}</LayerGroup></LayersControl.Overlay>
           </LayersControl>
           {candidate && <CircleMarker center={ll(candidate.geometry.coordinates[0])} radius={7} pathOptions={{ color: '#c2a2ff' }} />}
           <Focus candidate={candidate} />
         </MapContainer></div>
-        <div className="authority-map-legend">{t('Dashed gray: survey needed · Purple: selected survey · Cyan: verified official record. These are separate from current curb legality.', 'Boz kəsik: yoxlama tələb olunur · Bənövşəyi: seçilmiş tapşırıq · Mavi: təsdiqli rəsmi qeyd. Cari dayanma qanuniliyindən ayrıdır.')}</div>
+        <div className="authority-map-legend">{t('Dashed gray: survey needed · Purple: selected survey · Cyan: verified official record · Light-blue circles: measured passenger activity (only when imported) · Small dots (layer menu): analysed access points — OSM proxies, not demand. These are separate from current curb legality.', 'Boz kəsik: yoxlama tələb olunur · Bənövşəyi: seçilmiş tapşırıq · Mavi: təsdiqli rəsmi qeyd · Açıq mavi dairələr: ölçülmüş sərnişin axını (yalnız idxal ediləndə) · Kiçik nöqtələr (qat menyusu): təhlil edilən giriş nöqtələri — OSM proksisi, tələb deyil. Cari dayanma qanuniliyindən ayrıdır.')}</div>
         {candidate ? <article className="authority-detail" aria-label="Candidate detail"><div className="authority-controls"><h2>{candidate.name}</h2><button onClick={() => setSelected('')}>{t('Close', 'Bağla')}</button><button onClick={() => { document.body.dataset.authorityPrint = 'candidate'; window.print(); }}>{t('Print candidate', 'Namizədi çap et')}</button></div>
           <code>{candidate.candidate_id}</code><p><b>{t('Requires official field / engineering / legal assessment', 'Rəsmi sahə / mühəndislik / hüquqi qiymətləndirmə tələb olunur')}</b></p>
           {candidate.is_synthetic_example && <b>SIMULATED EXAMPLE</b>}

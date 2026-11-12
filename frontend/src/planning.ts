@@ -17,6 +17,13 @@ export interface Activity {
   id: number; location_id: string; name: string; pickups: number; dropoffs: number;
   period_start: string; period_end: string; source_ref: string; source_url: string;
   license: string; collection_method: string; passengers_per_hour: number;
+  longitude: number; latitude: number;
+}
+/** One analysed access point. Always a geographic proxy (OSM place), never measured demand. */
+export interface CoverageNode {
+  id: string; name: string; geometry: { type: 'Point'; coordinates: LngLat }; is_proxy: true;
+  source_url: string; state: 'SERVED' | 'POTENTIAL_COVERAGE_GAP' | 'INVENTORY_UNKNOWN' | 'NETWORK_UNRELIABLE';
+  distance_m: number | null; reason: string;
 }
 export interface PlanningSnapshot {
   area: { id: string; name: string; geometry: { type: 'Polygon'; coordinates: LngLat[][] } };
@@ -25,7 +32,7 @@ export interface PlanningSnapshot {
   parameters: { threshold_m: number }; limitations: string[]; methodology: string;
   summary: { verified_official_locations: number; observed_usable_curb_segments: number;
     survey_tasks: number; analyzed_nodes: number; excluded_segments: number; coverage_share: number | null };
-  candidates: Candidate[]; passenger_activity: Activity[];
+  candidates: Candidate[]; passenger_activity: Activity[]; coverage: CoverageNode[];
   verified_locations: { id: number; geometry: any; source_url: string | null; verified_at: string | null }[];
   exclusions: { segment_id: string; reason: string }[];
   empty_reason: string | null;
