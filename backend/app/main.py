@@ -32,7 +32,7 @@ from .store import AUTOMATED_SOURCES, FEATURE_KINDS, Store
 log = logging.getLogger("burdasaxla")
 
 AREA_MARGIN_DEG = 0.01  # ~1 km around the modelled bbox is still accepted
-EVIDENCE_DIR = C.DATA_DIR / "evidence"
+EVIDENCE_DIR = Path(os.environ.get("BURDASAXLA_EVIDENCE_DIR", C.DB_PATH.parent / "evidence"))
 MAX_PHOTO_BYTES = 15 * 1024 * 1024
 PHOTO_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 OBSERVED_CLAUSES = {"52.IV.1", "52.IV.3", "52.IV.5", "52.IV.8", "52.IV.9", "52.IV.11"}
