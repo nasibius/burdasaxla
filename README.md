@@ -80,6 +80,7 @@ are reset whenever the service restarts. Attach a disk at `/data` to keep them.
 | `BURDASAXLA_OSM` | `backend/data/osm_raw.json` | OSM snapshot |
 | `BURDASAXLA_DEFAULT_VEHICLE` | `taxi` | Vehicle class for the default map status |
 | `MAPILLARY_TOKEN` | unset | Enables the Mapillary importer |
+| `BURDASAXLA_DEMO_SURVEY` | unset | `1` adds one in-memory **SIMULATED EXAMPLE** survey area (never stored) so the map shows green. Every such curb is labelled SIMULATED in the map, cards, drawer and legend, is never `legally_confirmed`, and is ignored by AYNA planning. Enabled on the public demo (Pages + Render); turn off for real use. |
 | `VITE_STATIC`, `VITE_BASE` | unset, `/` | Build the static variant / set its public path |
 
 ## Quality checks

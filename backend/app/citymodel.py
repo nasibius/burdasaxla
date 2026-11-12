@@ -814,7 +814,11 @@ class CityModel:
         verified_dates += [i.detail.get("verified_at") for i in p["prohib"] + p["info"] if i.detail.get("verified_at")]
         sources = sorted({r["source"] for r in reasons + cautions + notes if r["source"] != "engine"} |
                          {f["source"] for f in feats} | {"osm"})
-        if status == ALLOWED:
+        # Green that rests only on a SIMULATED EXAMPLE survey (demo mode) must say so everywhere.
+        simulated = bool(feats) and all(f.get("is_synthetic_example") for f in feats)
+        if status == ALLOWED and simulated:
+            confidence = "simulated_example"
+        elif status == ALLOWED:
             confidence = "verified_observation"
         elif status == PROHIBITED:
             levels = {r["verification"] for r in reasons}
@@ -834,6 +838,7 @@ class CityModel:
             "coverage": [{"feature_id": f["id"], "kind": f["kind"], "source": f["source"],
                           "note": f.get("note"), "verified_at": f.get("verified_at")} for f in feats],
             "official": bool(p["official"]),
+            "simulated": simulated,
             "sources": sources,
             "osm_ref": f"way/{w.id}",
             "osm_timestamp": self.osm_timestamp,
@@ -953,7 +958,8 @@ class CityModel:
                                          "length_m": seg["length_m"],
                                          "rules": sorted({r["rule"] for r in seg["reasons"]}),
                                          "cautions": sorted({r["rule"] for r in seg["cautions"]}),
-                                         "official": seg["official"], "highway": seg["highway"]}})
+                                         "official": seg["official"], "highway": seg["highway"],
+                                         "simulated": seg.get("simulated", False)}})
         return {"type": "FeatureCollection", "features": feats}
 
     def context_layers(self):

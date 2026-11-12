@@ -68,9 +68,12 @@ export default function SegmentDrawer({ seg, lang, onClose, rules, law, vehicle 
     <aside className="drawer glass" aria-label="segment details">
       <div className={`drawer-head ${status}`}>
         <button className="x-btn" onClick={onClose} aria-label={t("close")}><IX size={16} /></button>
-        <span className={`status-pill ${status}`}><Icon size={14} />{t("st_" + status)}</span>
+        <span className={`status-pill ${status}`}><Icon size={14} />{t("st_" + status + (seg.confidence === "simulated_example" && status === "ALLOWED" ? "_sim" : ""))}</span>
         <h3>{seg.name || "—"}</h3>
         <div className="dsub">{t("st_" + status + "_long")}</div>
+        {seg.confidence === "simulated_example" && status === "ALLOWED" && (
+          <div className="sim-note"><span className="sim-badge">{t("sim_badge")}</span> {t("sim_drawer")}</div>
+        )}
         <div className="kv">
           <div><div className="k">{t("side")}</div><div className="v">{t("dir_" + seg.compass)}</div></div>
           <div><div className="k">{t("length")}</div><div className="v">{fmtDist(seg.length_m, lang)}</div></div>

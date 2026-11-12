@@ -22,7 +22,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from shapely.geometry import Point, box, shape
 
 from . import config as C
-from . import ingest
+from . import demo, ingest
 from .citymodel import CityModel, feature_prohibits, load_raw
 from .dropoff import Recommender
 from .planning_api import router_for
@@ -53,7 +53,7 @@ class State:
             t0 = time.perf_counter()
             if self.raw is None:
                 self.raw = load_raw()
-            model = CityModel(self.raw, self.store.list(with_evidence=False))
+            model = CityModel(self.raw, demo.with_demo(self.store.list(with_evidence=False), self.raw["bbox"]))
             self.model, self.rec = model, Recommender(model)
             self.build_ms = round((time.perf_counter() - t0) * 1000)
             if model.feature_errors:
@@ -196,6 +196,7 @@ def meta(vehicle: Vehicle = C.DEFAULT_VEHICLE):
     return {"area": "28 May, Bakı", "bbox": m.bbox, "center": [(w + e) / 2, (s + n) / 2],
             "osm_timestamp": m.osm_timestamp, "built_at": m.built_at, "build_ms": S.build_ms,
             "ruleset": ruleset()["version"], "law": ruleset()["law"], "stats": m.stats(vehicle), "mode": "api",
+            "demo_survey": demo.enabled(),
             "vehicle": vehicle, "vehicles": list(VEHICLE_CLASSES)}
 
 

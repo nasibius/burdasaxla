@@ -135,7 +135,8 @@ function ResultCard({ r, k, lang, sel, mode, unverified, onClick, onOpenSegment 
       <div className="chips">
         {unverified
           ? <span className="chip unk"><IHelp size={12} />{t("st_UNVERIFIED")}</span>
-          : <span className="chip ok"><ICheck size={12} />{t("st_ALLOWED")}</span>}
+          : <span className="chip ok"><ICheck size={12} />{t(r.simulated ? "st_ALLOWED_sim" : "st_ALLOWED")}</span>}
+        {r.simulated && <span className="chip sim">{t("sim_badge")}</span>}
         {r.official && <span className="chip brand"><IStar size={12} />{t("official")}</span>}
         {r.crossing && !r.crossing.must_cross && mode !== "driver" && <span className="chip">{t("same_side")}</span>}
         {r.crossing?.must_cross && r.crossing.safe_crossing && <span className="chip warn">{t("cross_safe")} · {r.crossing.crossing_distance_m} m</span>}
@@ -257,7 +258,7 @@ export default function Panel(p: Props) {
         {hasQuery && (
           <>
             <div className="results-head">
-              <h4>{t("confirmed_spots")}</h4>
+              <h4>{t(p.resp?.results.some((r) => r.simulated) ? "sim_spots" : "confirmed_spots")}</h4>
               {p.loading ? <small>{t("finding")}</small> : <small>{p.resp?.results.length ?? 0}</small>}
             </div>
             {p.resp?.warnings?.map((w) => <div key={w} className="warn-line"><IAlert size={13} />{t("warn_" + w)}</div>)}
@@ -285,6 +286,7 @@ export default function Panel(p: Props) {
           </>
         )}
 
+        {p.meta?.demo_survey && <div className="banner sim"><IAlert size={14} /><span>{t("sim_banner")}</span></div>}
         <div className="banner"><IInfo size={14} /><span>{noGreen ? t("no_green_banner") : t("demo_banner")}</span></div>
         <div className="mob-attr">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors · Basemap © Esri, HERE, Garmin · Leaflet</div>
       </div>

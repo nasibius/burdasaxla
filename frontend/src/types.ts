@@ -73,7 +73,7 @@ export interface SegFeature {
   geometry: { type: "LineString"; coordinates: LngLat[] };
   properties: {
     id: string; status: Status; by_vehicle: Record<VehicleClass, Status>; name: string; side: string; compass?: string;
-    length_m: number; rules: string[]; cautions: string[]; official: boolean; highway: string;
+    length_m: number; rules: string[]; cautions: string[]; official: boolean; highway: string; simulated?: boolean;
   };
 }
 
@@ -87,6 +87,8 @@ export interface Meta {
   ruleset: string;
   law?: LawInfo;
   mode?: "api" | "static";
+  /** SIMULATED EXAMPLE survey coverage is switched on (BURDASAXLA_DEMO_SURVEY). */
+  demo_survey?: boolean;
   vehicle?: VehicleClass;
   stats_by_vehicle?: Record<VehicleClass, Meta["stats"]>;
   stats: {
@@ -103,6 +105,8 @@ export interface SearchItem { name: string; kind: string; lat: number; lon: numb
 export interface Evidence {
   status: Status;
   legally_confirmed: boolean;
+  /** Green from SIMULATED EXAMPLE coverage only — demonstration, not evidence. */
+  simulated?: boolean;
   reasons: Reason[];
   cautions: Reason[];
   notes: string[];

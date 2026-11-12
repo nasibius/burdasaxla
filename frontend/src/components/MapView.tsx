@@ -88,7 +88,7 @@ function SegmentsLayer({ data, theme, onSelect, lang, selectedId }: {
       const st = (f?.properties as any)?.status as Status;
       return {
         color: colors[st], weight: segWeight(map.getZoom()), opacity: st === "UNVERIFIED" ? 0.8 : 0.95,
-        lineCap: "butt", renderer,
+        lineCap: "butt", renderer, ...((f?.properties as any)?.simulated && st === "ALLOWED" ? { dashArray: "10 5" } : {}),
       };
     };
     const layer = L.geoJSON({ type: "FeatureCollection", features: data } as any, {
@@ -98,7 +98,9 @@ function SegmentsLayer({ data, theme, onSelect, lang, selectedId }: {
         const shown = p.rules.length ? p.rules : (p.cautions ?? []);
         const rules = shown.slice(0, 3).map((r) => ruleTitle(r, lang)).join(" · ");
         lyr.bindTooltip(
-          `<div class="tip-st" style="color:${colors[p.status]}">${t("st_" + p.status)}</div><b>${p.name || "—"}</b>` +
+          `<div class="tip-st" style="color:${colors[p.status]}">${t("st_" + p.status + (p.simulated && p.status === "ALLOWED" ? "_sim" : ""))}` +
+          (p.simulated && p.status === "ALLOWED" ? ` <span class="sim-badge">${t("sim_badge")}</span></div><div class="sim-tip">${t("sim_tip")}</div>` : "</div>") +
+          `<b>${p.name || "—"}</b>` +
           `<div style="color:var(--muted)">${t("dir_" + (p as any).compass)} · ${Math.round(p.length_m)} m</div>` +
           (rules ? `<div style="margin-top:3px">${rules}</div>` : ""),
           { className: "seg-tip", sticky: true, direction: "top", offset: [0, -8] },

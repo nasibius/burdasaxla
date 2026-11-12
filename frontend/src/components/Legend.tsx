@@ -12,7 +12,7 @@ export default function Legend({ meta, lang, theme, showRoutes }: { meta: Meta |
       {(["ALLOWED", "PROHIBITED", "UNVERIFIED"] as const).map((s) => (
         <div className="lg-row" key={s} title={t("st_" + s + "_long")}>
           <span className="lg-swatch" style={{ background: c[s] }} />
-          <span>{t("st_" + s)}</span>
+          <span>{t("st_" + s + (s === "ALLOWED" && meta?.demo_survey ? "_sim" : ""))}{s === "ALLOWED" && meta?.demo_survey && <> <span className="sim-badge">{t("sim_badge")}</span></>}</span>
           <span className="km">{km(s)}</span>
         </div>
       ))}

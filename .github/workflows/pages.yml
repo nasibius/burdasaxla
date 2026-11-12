@@ -22,6 +22,9 @@ jobs:
         with: { python-version: "3.12", cache: pip, cache-dependency-path: backend/requirements.txt }
       - name: Precompute curb statuses with the Python rule engine
         working-directory: backend
+        # Demo only: adds one in-memory SIMULATED EXAMPLE survey area so the map shows green.
+        # Every such curb is labelled SIMULATED and never legally confirmed (backend/app/demo.py).
+        env: { BURDASAXLA_DEMO_SURVEY: "1" }
         run: |
           pip install -r requirements.txt
           python scripts/export_static.py

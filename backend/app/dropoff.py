@@ -337,7 +337,8 @@ def evidence(seg, vehicle):
     applicable = [r for r in seg["reasons"] if vehicle not in r.get("exempt", [])]
     return {
         "status": status,
-        "legally_confirmed": status == ALLOWED,
+        "legally_confirmed": status == ALLOWED and not seg.get("simulated"),
+        "simulated": bool(seg.get("simulated")),
         "reasons": [brief(r) for r in applicable],
         "cautions": [brief(r) for r in seg["cautions"]],
         "notes": [n["rule"] for n in seg["notes"]],
