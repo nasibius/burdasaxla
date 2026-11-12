@@ -233,3 +233,21 @@ source, period, license and collection method; overlapping sources are not summe
 See [audit](docs/feature_audit.md), [delivery and reproducible tests](docs/delivery.md)
 and [authority API / data contract](docs/authority_api.md). Existing law, sign and marking
 work is unchanged. AYNA is a possible stakeholder; no partnership is asserted.
+
+### Persistent backend storage
+
+Admin writes require the full backend deployment. On Render, use the Docker service
+from `render.yaml`. Its default free plan is an ephemeral demonstration: data can be
+lost when the instance restarts. For saved operational records, choose a service plan
+that supports persistent disks, attach a disk at `/data`, and keep
+`BURDASAXLA_DB=/data/burdasaxla.sqlite3`. Review Render's displayed plan/disk costs
+before creating a paid service. The generated `BURDASAXLA_ADMIN_TOKEN` is the admin
+password; retrieve it privately from the service's Environment settings.
+
+Open the resulting service URL with `/#admin` to use the editor. The same service
+serves both the UI and API; GitHub Pages continues to show its read-only snapshot.
+Photos now default to the `evidence` directory beside the SQLite database, so both
+observations and their evidence live on the persistent disk. Override with
+`BURDASAXLA_EVIDENCE_DIR` only when an existing deployment uses another mounted
+location. Migrate old photos into the configured directory before switching an
+existing deployment; SQLite records refer to their stored filenames.

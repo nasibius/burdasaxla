@@ -7,3 +7,7 @@ frontend/dist
 frontend/dist-static
 frontend/public/static-data
 .git
+.venv
+**/*.sqlite3-*
+backend/data/evidence
+work
