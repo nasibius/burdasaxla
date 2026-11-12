@@ -8,3 +8,5 @@ frontend/dist-static/
 frontend/public/static-data/
 *.tsbuildinfo
 backend/data/evidence/
+
+.venv/
