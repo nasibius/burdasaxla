@@ -17,6 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import config as C  # noqa: E402
 from app.citymodel import CityModel, load_raw  # noqa: E402
+from app.demo import enabled as demo_enabled  # noqa: E402
+from app.demo import with_demo  # noqa: E402
 from app.planning import build_snapshot  # noqa: E402
 from app.planning_store import PlanningStore  # noqa: E402
 from app.rules import ruleset  # noqa: E402
@@ -29,10 +31,10 @@ def main():
     out = Path(sys.argv[1]) if len(sys.argv) > 1 else C.BASE_DIR.parent / "frontend" / "public" / "static-data"
     out.mkdir(parents=True, exist_ok=True)
     raw = load_raw()
-    # Only real, reviewed observations from the database. Nothing is added for the demo:
-    # without verified surveys the static map is RED/YELLOW only, exactly like the API.
+    # Only real, reviewed observations from the database. With BURDASAXLA_DEMO_SURVEY=1 one in-memory
+    # SIMULATED EXAMPLE survey area is added (app/demo.py); its green is labelled `simulated` everywhere.
     features = Store().list() if C.DB_PATH.exists() else []
-    m = CityModel(raw, [f for f in features if f["status"] in ("verified", "pending")])
+    m = CityModel(raw, with_demo([f for f in features if f["status"] in ("verified", "pending")], raw["bbox"]))
 
     revision = os.environ.get("GITHUB_SHA") or subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=C.BASE_DIR.parent, text=True).strip()
@@ -47,6 +49,7 @@ def main():
             "osm_timestamp": m.osm_timestamp, "built_at": m.built_at, "build_ms": 0,
             "code_revision": revision, "planning_run_id": planning["run_id"],
             "ruleset": ruleset()["version"], "law": ruleset()["law"], "stats": m.stats(), "mode": "static",
+            "demo_survey": demo_enabled(),
             "vehicle": C.DEFAULT_VEHICLE, "vehicles": ["taxi", "private"],
             "stats_by_vehicle": {v: m.stats(v) for v in ("taxi", "private")}}
 

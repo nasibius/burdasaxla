@@ -73,7 +73,9 @@ def build_snapshot(model, features, *, passenger_activity=None, reviews=None, th
     features = sorted(({k: v for k, v in f.items() if k != "evidence"} for f in features), key=lambda f: f["id"])
     verified = [f for f in features if f.get("status") == "verified"]
     official = [f for f in verified if f.get("kind") == "official_zone"]
-    observed = [s for s in model.segments.values() if s["status"] == "ALLOWED" and not s["official"]]
+    # Simulated demo coverage is never evidence: not observed supply, and it does not remove survey targets.
+    observed = [s for s in model.segments.values()
+                if s["status"] == "ALLOWED" and not s["official"] and not s.get("simulated")]
     inventory_version = digest(verified)
     sources = {"osm": model.osm_timestamp, "verified_inventory": inventory_version,
                "code_revision": code_revision, "network_checksum": digest(model.raw), "observations": digest(features),
@@ -109,7 +111,7 @@ def build_snapshot(model, features, *, passenger_activity=None, reviews=None, th
             reason = "Insufficient approximate segment length"
         elif not boundary.covers(LineString(seg["coords"])):
             reason = "Outside pilot boundary"
-        elif seg["status"] == "ALLOWED":
+        elif seg["status"] == "ALLOWED" and not seg.get("simulated"):
             reason = "Existing verified curb; not a new survey target"
         if reason:
             excluded.append({"segment_id": seg["id"], "reason": reason})

@@ -8,3 +8,6 @@ services:
     envVars:
       - key: BURDASAXLA_ADMIN_TOKEN
         generateValue: true
+      # Demo: SIMULATED EXAMPLE survey coverage (labelled everywhere, never legally confirmed). Remove for real use.
+      - key: BURDASAXLA_DEMO_SURVEY
+        value: "1"

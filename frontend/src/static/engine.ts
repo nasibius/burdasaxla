@@ -322,7 +322,8 @@ export class StaticEngine {
   private evidence(seg: Seg, vehicle: VehicleClass) {
     const status = STATUS[seg.status[vehicle]];
     return {
-      status, legally_confirmed: status === "ALLOWED",
+      status, legally_confirmed: status === "ALLOWED" && seg.confidence !== "simulated_example",
+      simulated: seg.confidence === "simulated_example",
       reasons: seg.rules.map((rule) => ({ rule })), cautions: seg.cautions.map((rule) => ({ rule })),
       notes: seg.notes, sources: ["osm"], confidence: seg.confidence,
     };

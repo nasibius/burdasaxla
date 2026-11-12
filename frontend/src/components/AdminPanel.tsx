@@ -3,6 +3,7 @@ import { ADMIN_URL, STATIC_MODE, api, type NewFeature } from "../api";
 import type { CuratedFeature, FeatureKind, FeatureSource, Impact, LngLat, SourcesReport } from "../types";
 import { makeT, type Lang } from "../i18n";
 import { IAlert, ICheck, IExternal, IMap, IShield, ITrash, IX, Logo } from "./Icons";
+import AdminRecommendations from "./AdminRecommendations";
 
 export const TOOL_GEOM: Record<FeatureKind, "point" | "line" | "polygon"> = {
   sign_3_27: "point", sign_3_28: "point", marking_1_4: "line", marking_1_10: "line", bus_lane: "line",
@@ -129,7 +130,7 @@ export default function AdminPanel(p: Props) {
   const [form, setForm] = useState<FormState | null>(null);
   const [impact, setImpact] = useState<Impact | null>(null);
   const [busy, setBusy] = useState(false);
-  const [tab, setTab] = useState<"queue" | "verified" | "rejected">("queue");
+  const [tab, setTab] = useState<"queue" | "verified" | "rejected" | "recs">("queue");
 
   const load = async (tok = p.token) => {
     try {
@@ -234,7 +235,7 @@ export default function AdminPanel(p: Props) {
   const drawHint = form ? (TOOL_GEOM[form.kind] === "point" ? t("admin_draw_point") : TOOL_GEOM[form.kind] === "line" ? t("admin_draw_line") : t("admin_draw_poly")) : "";
   const editingFeature = form?.id ? all.find((f) => f.id === form.id) : null;
   const needsGeometry = !form?.id && !p.draftDone;
-  const list = tab === "queue" ? tasks : all.filter((f) => f.status === tab);
+  const list = tab === "recs" ? [] : tab === "queue" ? tasks : all.filter((f) => f.status === tab);
 
   const FeatureCard = ({ f }: { f: CuratedFeature }) => (
     <div className="task" onMouseEnter={() => p.setHighlight(f.id)} onMouseLeave={() => p.setHighlight(null)}>
@@ -289,9 +290,15 @@ export default function AdminPanel(p: Props) {
       </div>
       <div className="panel-body">
         {STATIC_MODE ? (
+          <>
           <div className="static-note">{t("static_admin")}
             {ADMIN_URL && <p><a className="btn-primary" href={ADMIN_URL}>{p.lang === "az" ? "Canlı admin panelini aç" : "Open live admin"}</a></p>}
           </div>
+          <div className="admin-sec">
+            <div className="field-label"><span>{t("admin_recs")}</span></div>
+            <AdminRecommendations lang={p.lang} token="" focusMap={p.focusMap} />
+          </div>
+          </>
         ) : !authed ? (
           <form onSubmit={(e) => { e.preventDefault(); p.setToken(tokenInput); load(tokenInput); }}>
             <div className="field-label"><span>{t("admin_token")}</span></div>
@@ -442,13 +449,15 @@ export default function AdminPanel(p: Props) {
             {msg && <div className="warn-line" style={{ marginTop: 10 }}>{msg}</div>}
 
             <div className="admin-sec">
-              <div className="seg-ctl small" style={{ gridTemplateColumns: "repeat(3,1fr)" }}>
+              <div className="seg-ctl small" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
                 <button className={tab === "queue" ? "on" : ""} onClick={() => setTab("queue")}>{t("admin_queue")} · {tasks.length}</button>
                 <button className={tab === "verified" ? "on" : ""} onClick={() => setTab("verified")}>{t("st_verified")} · {all.filter((f) => f.status === "verified").length}</button>
                 <button className={tab === "rejected" ? "on" : ""} onClick={() => setTab("rejected")}>{t("st_rejected")} · {all.filter((f) => f.status === "rejected").length}</button>
+                <button className={tab === "recs" ? "on" : ""} onClick={() => setTab("recs")}>{t("admin_recs")}</button>
               </div>
               <div style={{ height: 10 }} />
-              {list.length === 0 && <div className="mode-hint" style={{ margin: "0 2px" }}>{t("admin_empty_queue")}</div>}
+              {tab === "recs" && <AdminRecommendations lang={p.lang} token={p.token} focusMap={p.focusMap} />}
+              {tab !== "recs" && list.length === 0 && <div className="mode-hint" style={{ margin: "0 2px" }}>{t("admin_empty_queue")}</div>}
               {list.map((f) => <FeatureCard key={f.id} f={f} />)}
             </div>
 
