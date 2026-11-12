@@ -110,7 +110,7 @@ def simulated_cells(model):
         h = int(hashlib.sha1(it["name"].encode()).hexdigest(), 16)
         req = 25 + h % 90
         out.append({"cell": cell, "lat": lat, "lon": lon, "requests": req, "unmet": req - h % 7,
-                    "first_seen": None, "last_seen": None, "is_synthetic_example": True})
+                    "first_seen": None, "last_seen": None, "is_synthetic_example": True, "place": it["name"]})
         if len(out) == 10:
             break
     return out
@@ -151,7 +151,7 @@ def hotspots(model, cells, vehicle="taxi", min_unmet=MIN_UNMET, legal_radius_m=L
         sim = bool(c.get("is_synthetic_example"))
         out.append({
             "id": ("sim-" if sim else "") + c["cell"], "center": [round(c["lon"], 6), round(c["lat"], 6)],
-            "place": _place_name(model, pt), "requests": c["requests"], "unmet": c["unmet"],
+            "place": c.get("place") or _place_name(model, pt), "requests": c["requests"], "unmet": c["unmet"],
             "unmet_share": round(c["unmet"] / c["requests"], 2) if c["requests"] else None,
             "nearest_legal_m": None if nearest_legal is None else round(nearest_legal),
             "first_seen": c.get("first_seen"), "last_seen": c.get("last_seen"),
