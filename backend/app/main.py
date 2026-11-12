@@ -22,7 +22,7 @@ from pydantic import AfterValidator, BaseModel, Field
 from shapely.geometry import Point, box, shape
 
 from . import config as C
-from . import demo, ingest
+from . import demand, demo, ingest
 from .citymodel import CityModel, feature_prohibits, load_raw
 from .dropoff import Recommender
 from .planning_api import router_for
@@ -247,6 +247,10 @@ def recommendations(req: RecRequest):
                 "diagnostics": {}, "warnings": []}
     origin = req.origin if req.origin and in_area(req.origin) else None
     out = S.rec.recommend(req.destination, origin, req.mode, req.max_walk_m, vehicle=req.vehicle)
+    try:  # aggregate demand signal for planning; never let it break a driver's request
+        demand.DemandStore(S.store.path).log(req.destination, req.mode, req.vehicle, demand.served(out))
+    except Exception:  # noqa: BLE001
+        log.exception("demand logging failed")
     if req.origin and origin is None:
         out.setdefault("warnings", []).append("origin_outside_area")
     return out
@@ -567,6 +571,12 @@ def rebuild():
 
 
 app.include_router(router_for(S, model, admin))
+
+
+@app.get("/api/authority/demand")
+def demand_hotspots(vehicle: Vehicle = C.DEFAULT_VEHICLE, min_unmet: int = Query(demand.MIN_UNMET, ge=1, le=1000)):
+    """Areas with many unmet drop-off/pick-up requests and no legal stopping place nearby (aggregate only)."""
+    return demand.report(model(), demand.DemandStore(S.store.path), vehicle, min_unmet)
 
 
 @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PATCH", "DELETE"], include_in_schema=False)

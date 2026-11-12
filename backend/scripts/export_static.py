@@ -17,6 +17,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import config as C  # noqa: E402
 from app.citymodel import CityModel, load_raw  # noqa: E402
+from app.demand import DemandStore, report  # noqa: E402
 from app.demo import enabled as demo_enabled  # noqa: E402
 from app.demo import with_demo  # noqa: E402
 from app.planning import build_snapshot  # noqa: E402
@@ -97,6 +98,7 @@ def main():
         "meta.json": meta, "segments.json": m.segments_geojson(), "segment-details.json": details,
         "context.json": m.context_layers(), "features.json": public_features, "search.json": search,
         "engine.json": engine, "rules.json": ruleset(), "planning.json": planning,
+        "demand.json": report(m, DemandStore(C.DB_PATH) if C.DB_PATH.exists() else None),
     }
     for name, data in files.items():
         (out / name).write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")))

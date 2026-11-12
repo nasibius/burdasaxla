@@ -219,6 +219,16 @@ Vehicle classes: `taxi` (default) and `private`. They differ only where the law 
 | AI Vision sign detection, LLM extraction of AYNA notices | ⏳ not built. Their output plugs into the same pending queue (`source=ai_vision`). |
 | Time-dependent restrictions | ⏳ plate text is recorded but not evaluated |
 
+## Demand recommendations ("build a new stopping place here")
+
+Admin → **Tövsiyələr** → **Tələbat → yeni yer**, API `GET /api/authority/demand`. Every drop-off/pick-up
+search on the live API is logged as an aggregate ~100 m cell (no driver position, exact destination or
+identity). An area is recommended for a new stopping place when it has ≥5 requests without a legally
+confirmed spot and no confirmed legal stopping place within 150 m; the suggested site is the nearest curb
+within 200 m that is not prohibited by statute. It is a planning signal, not a legal approval. Simulated
+demo green never counts as supply. With `BURDASAXLA_DEMO_SURVEY=1`, labelled SIMULATED example hotspots
+(invented counts at real OSM places) are added so the static demo is not empty.
+
 ## AYNA planning and passenger activity
 
 Open **AYNA Planning** (`#authority`) for a separate authority journey. The present

@@ -258,3 +258,11 @@ def test_store_is_thread_safe(tmp_path):
 
     with ThreadPoolExecutor(16) as pool:
         assert all(n >= 1 for n in pool.map(work, range(200)))
+
+
+def test_recommendation_requests_feed_aggregate_demand(client):
+    before = client.get("/api/authority/demand").json()["logged_requests"]
+    for _ in range(2):
+        client.post("/api/dropoff/recommendations", json={"destination": list(ll(150, 10)), "origin": list(ll(10, 5))})
+    rep = client.get("/api/authority/demand", params={"min_unmet": 1}).json()
+    assert rep["logged_requests"] == before + 2 and "hotspots" in rep
