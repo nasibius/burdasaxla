@@ -217,3 +217,19 @@ Vehicle classes: `taxi` (default) and `private`. They differ only where the law 
 | PostgreSQL/PostGIS | ⏳ **Not used.** The app has always run on SQLite + in-memory Shapely, and still does. Moving to PostGIS is a storage swap (the table layout maps onto the spec's tables). |
 | AI Vision sign detection, LLM extraction of AYNA notices | ⏳ not built. Their output plugs into the same pending queue (`source=ai_vision`). |
 | Time-dependent restrictions | ⏳ plate text is recorded but not evaluated |
+
+## AYNA planning and passenger activity
+
+Open **AYNA Planning** (`#authority`) for a separate authority journey. The present
+OSM-only snapshot supports **curb survey tasks**, not proven infrastructure gaps or
+approved new zones. Coverage remains `INVENTORY_UNKNOWN`; scores and network benefit
+are withheld. Cards, CSV/GeoJSON and printable reports share the selected status filter.
+
+A separate **Passenger activity** table accepts sourced aggregate boarding and
+alighting counts through the authenticated backend. No passenger observations are
+bundled. The empty table means **not measured**, not zero demand. Records retain their
+source, period, license and collection method; overlapping sources are not summed.
+
+See [audit](docs/feature_audit.md), [delivery and reproducible tests](docs/delivery.md)
+and [authority API / data contract](docs/authority_api.md). Existing law, sign and marking
+work is unchanged. AYNA is a possible stakeholder; no partnership is asserted.

@@ -25,6 +25,7 @@ from . import config as C
 from . import ingest
 from .citymodel import CityModel, feature_prohibits, load_raw
 from .dropoff import Recommender
+from .planning_api import router_for
 from .rules import RULES, VEHICLE_CLASSES, ruleset
 from .store import AUTOMATED_SOURCES, FEATURE_KINDS, Store
 
@@ -562,6 +563,9 @@ def audit(feature_id: int | None = None):
 def rebuild():
     S.rebuild()
     return {"build_ms": S.build_ms, "stats": model().stats(), "feature_errors": model().feature_errors}
+
+
+app.include_router(router_for(S, model, admin))
 
 
 @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PATCH", "DELETE"], include_in_schema=False)

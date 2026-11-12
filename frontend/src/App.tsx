@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { STATIC_MODE, api } from "./api";
+import AuthorityPanel from "./components/AuthorityPanel";
 import AdminPanel, { TOOL_GEOM } from "./components/AdminPanel";
 import { IInfo, ILayers, IMap, IMoon, IShield, ISun, IX, Logo } from "./components/Icons";
 import Legend from "./components/Legend";
@@ -22,7 +23,7 @@ const DEMO_ORIGIN: LngLat = [49.8436, 40.3757];
 export default function App() {
   const [theme, setTheme] = useState<"dark" | "light">(() => store.get("bs-theme", "dark") as any);
   const [lang, setLang] = useState<Lang>(() => store.get("bs-lang", "az") as Lang);
-  const [view, setView] = useState<"map" | "admin">(() => (location.hash === "#admin" ? "admin" : "map"));
+  const [view, setView] = useState<"map" | "admin" | "authority">(() => (location.hash === "#authority" ? "authority" : location.hash === "#admin" ? "admin" : "map"));
   const t = makeT(lang);
 
   const [meta, setMeta] = useState<Meta | null>(null);
@@ -67,7 +68,7 @@ export default function App() {
   useEffect(() => { store.set("bs-vehicle", vehicle); }, [vehicle]);
   useEffect(() => { api.rules().then(setCatalog).catch(() => setCatalog(null)); }, []);
   useEffect(() => {
-    const onHash = () => setView(location.hash === "#admin" ? "admin" : "map");
+    const onHash = () => setView(location.hash === "#authority" ? "authority" : location.hash === "#admin" ? "admin" : "map");
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -175,7 +176,7 @@ export default function App() {
 
   return (
     <div className="app">
-      <MapView
+      {view !== "authority" && <MapView
         center={center} theme={theme} lang={lang} segments={segments} context={context} features={features} layers={layers}
         destination={view === "map" && mode !== "driver" ? destination : null} origin={view === "map" ? origin : null}
         results={results} selectedKey={selectedKey} selectedSegment={segDetail?.id ?? null}
@@ -192,7 +193,7 @@ export default function App() {
         onMoveDestination={(c) => { setDestination(c); setDestLabel(`📍 ${c[1].toFixed(5)}, ${c[0].toFixed(5)}`); }}
         onMoveOrigin={(c) => { setOrigin(c); setOriginLabel(`${c[1].toFixed(5)}, ${c[0].toFixed(5)}`); }}
         onZoom={setZoom} zoom={zoom}
-      />
+      />}
 
       {view === "map" ? (
         <Panel
@@ -204,7 +205,7 @@ export default function App() {
           resp={resp} loading={loading} error={error} selectedKey={selectedKey} onSelect={setSelectedKey}
           onOpenSegment={openSegment} vehicle={vehicle} setVehicle={setVehicle}
         />
-      ) : (
+      ) : view === "authority" ? <AuthorityPanel lang={lang} theme={theme} segments={segments} /> : (
         <AdminPanel
           lang={lang} token={token} setToken={setToken} tool={tool}
           setTool={(k) => { setTool(k); setDraft([]); setDraftDone(false); }}
@@ -217,10 +218,11 @@ export default function App() {
       )}
 
       <div className="toolbar">
+        <button className={`tb-btn authority-toggle ${view === "authority" ? "active" : ""}`} onClick={() => { location.hash = view === "authority" ? "" : "#authority"; setSegDetail(null); setRulesOpen(false); setPicking(null); }}>{view === "authority" ? (lang === "az" ? "Sərnişin / Sürücü" : "Passenger / Driver") : (lang === "az" ? "AYNA Planlaşdırma" : "AYNA Planning")}</button>
         <div className="mob-brand glass"><Logo size={28} /><span>Burda<b>Saxla</b></span></div>
-        <button className={`tb-btn ${layersOpen ? "active" : ""}`} onClick={() => setLayersOpen((o) => !o)} aria-label={t("layers")}>
+        {view !== "authority" && <button className={`tb-btn ${layersOpen ? "active" : ""}`} onClick={() => setLayersOpen((o) => !o)} aria-label={t("layers")}>
           <ILayers size={17} /><span className="lbl">{t("layers")}</span>
-        </button>
+        </button>}
         <button className={`tb-btn ${rulesOpen ? "active" : ""}`} onClick={() => { setRulesOpen((o) => !o); setSegDetail(null); }} aria-label={t("rules_btn")}>
           <IInfo size={17} /><span className="lbl">{t("rules_btn")}</span>
         </button>
@@ -233,7 +235,7 @@ export default function App() {
         </button>
       </div>
 
-      {layersOpen && (
+      {view !== "authority" && layersOpen && (
         <div className="popover glass">
           {([["segments", "layer_segments"], ["stops", "layer_stops"], ["crossings", "layer_crossings"], ["features", "layer_features"]] as const).map(([k, label]) => (
             <div key={k} className={`toggle-row ${layers[k] ? "on" : ""}`} onClick={() => toggleLayer(k)} role="switch" aria-checked={layers[k]}>
@@ -250,7 +252,7 @@ export default function App() {
         </div>
       )}
 
-      {!segDetail && !rulesOpen && <Legend meta={meta} lang={lang} theme={theme} showRoutes={results.length > 0} />}
+      {view !== "authority" && !segDetail && !rulesOpen && <Legend meta={meta} lang={lang} theme={theme} showRoutes={results.length > 0} />}
       {segDetail && <SegmentDrawer seg={segDetail} lang={lang} onClose={() => setSegDetail(null)} rules={rulesById} law={catalog?.law} vehicle={vehicle} />}
       {rulesOpen && !segDetail && catalog && <RulesPanel catalog={catalog} lang={lang} onClose={() => setRulesOpen(false)} />}
     </div>

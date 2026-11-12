@@ -8,6 +8,8 @@ Usage:  python scripts/export_static.py [out_dir]
 Default out_dir: ../frontend/public/static-data
 """
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,6 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from app import config as C  # noqa: E402
 from app.citymodel import CityModel, load_raw  # noqa: E402
+from app.planning import build_snapshot  # noqa: E402
+from app.planning_store import PlanningStore  # noqa: E402
 from app.rules import ruleset  # noqa: E402
 from app.store import Store  # noqa: E402
 
@@ -30,9 +34,18 @@ def main():
     features = Store().list() if C.DB_PATH.exists() else []
     m = CityModel(raw, [f for f in features if f["status"] in ("verified", "pending")])
 
+    revision = os.environ.get("GITHUB_SHA") or subprocess.check_output(
+        ["git", "rev-parse", "HEAD"], cwd=C.BASE_DIR.parent, text=True).strip()
+    if not os.environ.get("GITHUB_SHA") and subprocess.check_output(
+            ["git", "status", "--porcelain"], cwd=C.BASE_DIR.parent, text=True).strip():
+        revision += "-dirty"
+    planning_store = PlanningStore(C.DB_PATH)
+    planning = build_snapshot(m, features, passenger_activity=planning_store.activity(),
+                              reviews=planning_store.reviews(public=True), code_revision=revision)
     s, w, n, e = m.bbox
     meta = {"area": "28 May, Bakı", "bbox": m.bbox, "center": [(w + e) / 2, (s + n) / 2],
             "osm_timestamp": m.osm_timestamp, "built_at": m.built_at, "build_ms": 0,
+            "code_revision": revision, "planning_run_id": planning["run_id"],
             "ruleset": ruleset()["version"], "law": ruleset()["law"], "stats": m.stats(), "mode": "static",
             "vehicle": C.DEFAULT_VEHICLE, "vehicles": ["taxi", "private"],
             "stats_by_vehicle": {v: m.stats(v) for v in ("taxi", "private")}}
@@ -80,7 +93,7 @@ def main():
     files = {
         "meta.json": meta, "segments.json": m.segments_geojson(), "segment-details.json": details,
         "context.json": m.context_layers(), "features.json": public_features, "search.json": search,
-        "engine.json": engine, "rules.json": ruleset(),
+        "engine.json": engine, "rules.json": ruleset(), "planning.json": planning,
     }
     for name, data in files.items():
         (out / name).write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")))
