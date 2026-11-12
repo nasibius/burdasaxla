@@ -6,7 +6,7 @@ force (Law of the Republic of Azerbaijan "On Road Traffic", Art. 52 and the
 road-sign / road-marking rules) before production use. Bump `version` when a
 parameter changes so affected segments can be recomputed and audited.
 """
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 
 RULESET_VERSION = "2026.11-mvp1"
 

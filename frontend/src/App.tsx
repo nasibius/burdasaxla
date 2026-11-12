@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api } from "./api";
+import { STATIC_MODE, api } from "./api";
 import AdminPanel, { TOOL_GEOM } from "./components/AdminPanel";
 import { ILayers, IMap, IMoon, IShield, ISun, IX, Logo } from "./components/Icons";
 import Legend from "./components/Legend";
@@ -68,7 +68,7 @@ export default function App() {
       .catch((e) => setLoadErr(e.message));
   }, [version]);
   useEffect(() => {
-    const p = view === "admin" && token
+    const p = view === "admin" && token && !STATIC_MODE
       ? api.admin.list(token).then((l) => l.filter((f) => f.status !== "rejected")).catch(() => api.features())
       : api.features();
     p.then(setFeatures).catch(() => setFeatures([]));
@@ -93,14 +93,14 @@ export default function App() {
         if (origin && (mode === "driver" || r.results.some((x) => x.drive_route))) pts.push(origin);
         setFit((f) => ({ pts, token: f.token + 1, maxZoom: r.results.length ? 18 : 16 }));
         if (mode !== "driver" && destLabel.startsWith("📍") && r.curb_at_door?.name) setDestLabel("📍 " + r.curb_at_door.name);
-      }).catch((e) => id === reqId.current && setError(e.message))
+      }).catch((e) => id === reqId.current && setError(e.message === "network" ? t("err_network") : e.message))
         .finally(() => id === reqId.current && setLoading(false));
     }, 120);
     return () => window.clearTimeout(h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, destination, origin, maxWalk, version, view]);
 
-  const openSegment = useCallback((id: string) => {
+  const openSegment = useCallback((id: string, _at?: LngLat) => {
     api.segment(id).then(setSegDetail).catch((e) => setError(e.message));
   }, []);
 
@@ -122,13 +122,14 @@ export default function App() {
 
   const onPickSearch = (it: SearchItem) => { setDestination([it.lon, it.lat]); setDestLabel(it.name); setPicking(null); };
   const onMyLocation = () => {
-    if (!navigator.geolocation) return setError(t("outside_area"));
+    if (!navigator.geolocation) { setError(t("geo_unavailable")); setPicking("origin"); return; }
     navigator.geolocation.getCurrentPosition((pos) => {
       const c: LngLat = [pos.coords.longitude, pos.coords.latitude];
       const b = meta?.bbox;
       if (b && (c[1] < b[0] || c[1] > b[2] || c[0] < b[1] || c[0] > b[3])) { setError(t("outside_area")); setPicking("origin"); return; }
       setOrigin(c); setOriginLabel(t("my_location"));
-    }, () => { setError(t("outside_area")); setPicking("origin"); }, { enableHighAccuracy: true, timeout: 8000 });
+    }, (err) => { setError(t(err.code === 1 ? "geo_denied" : "geo_unavailable")); setPicking("origin"); },
+    { enableHighAccuracy: true, timeout: 8000 });
   };
 
   useEffect(() => {
@@ -164,7 +165,12 @@ export default function App() {
         picking={!!picking || (view === "admin" && !!tool && !draftDone)}
         fitPoints={fit.pts} fitToken={fit.token} fitMaxZoom={fit.maxZoom}
         draft={view === "admin" && tool ? { kind: tool, coords: draft } : null}
-        onMapClick={onMapClick} onSelectSegment={openSegment} onSelectRank={setSelectedRank}
+        onMapClick={onMapClick} onSelectRank={setSelectedRank}
+        onSelectSegment={(id, at) => {
+          // While placing a point (destination/driver/admin drawing), a click on a curb is a placement, not "open details".
+          if (picking || (view === "admin" && tool && !draftDone)) onMapClick(at);
+          else openSegment(id);
+        }}
         onMoveDestination={(c) => { setDestination(c); setDestLabel(`📍 ${c[1].toFixed(5)}, ${c[0].toFixed(5)}`); }}
         onMoveOrigin={(c) => { setOrigin(c); setOriginLabel(`${c[1].toFixed(5)}, ${c[0].toFixed(5)}`); }}
         onZoom={setZoom} zoom={zoom}

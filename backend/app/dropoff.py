@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import heapq
 import math
+from itertools import pairwise
 
 from shapely.geometry import Point
 
@@ -75,7 +76,7 @@ class Recommender:
         if (b, a) in self.m.drive_edges:
             sources[a] = min(sources.get(a, math.inf), t / sp)
         snapped = seg.interpolate(t)
-        return {"sources": sources, "snapped": snapped, "dist": float(dist[0]), "way": w}
+        return {"sources": sources, "snapped": snapped, "dist": float(dist[0]), "way": w, "edge_idx": i, "t": t, "L": L}
 
     def _snap_walk(self, pt: Point):
         idx, dist = self.m.walk_edge_tree.query_nearest(pt, max_distance=250, return_distance=True)
@@ -106,7 +107,7 @@ class Recommender:
                 out.append({"seg": seg, "way": w, "pos": pos, "pt": cp, "air": d})
         return out
 
-    def _arrival(self, cand, ddist):
+    def _arrival(self, cand, ddist, snap=None):
         """Driving cost to reach the candidate travelling in the legal direction."""
         w, pos, seg = cand["way"], cand["pos"], cand["seg"]
         i = w.edge_index(pos)
@@ -115,19 +116,26 @@ class Recommender:
             a, b, along = w.nodes[i], w.nodes[i + 1], pos - w.cum[i]
         else:
             a, b, along = w.nodes[i + 1], w.nodes[i], w.cum[i + 1] - pos
-        if (a, b) not in self.m.drive_edges or a not in ddist:
+        if (a, b) not in self.m.drive_edges:
             return None
-        return {"node": a, "seconds": ddist[a] + along / sp, "metres_edge": along, "edge_start_idx": i}
+        # Driver is already on this edge, behind the spot: drive straight to it.
+        if snap and snap["way"].id == w.id and snap["edge_idx"] == i:
+            t_from_a = snap["t"] if seg["travel"] == "fwd" else snap["L"] - snap["t"]
+            if t_from_a <= along + 0.5:
+                return {"node": None, "direct": True, "seconds": max(0.0, along - t_from_a) / sp}
+        if a not in ddist:
+            return None
+        return {"node": a, "seconds": ddist[a] + along / sp}
 
     def _drive_path(self, cand, arr, prev, snap, origin_pt):
-        nodes = path_to(prev, arr["node"], snap["sources"])
         coords = [(origin_pt.x, origin_pt.y), (snap["snapped"].x, snap["snapped"].y)]
-        coords += [self.m.xy[n] for n in nodes]
+        if not arr.get("direct"):
+            coords += [self.m.xy[n] for n in path_to(prev, arr["node"])]
         w = cand["way"]
         end_center = w.line.interpolate(cand["pos"])
         coords.append((end_center.x, end_center.y))
         coords.append((cand["pt"].x, cand["pt"].y))
-        metres = sum(math.dist(p, q) for p, q in zip(coords[1:], coords[2:]))
+        metres = sum(math.dist(p, q) for p, q in pairwise(coords[1:]))
         return to_ll_coords(coords), metres
 
     def _walk_to(self, cand, wdist):
@@ -211,10 +219,13 @@ class Recommender:
         wdist, wprev = dijkstra(self.m.walk_adj, wsnap["sources"], cutoff=max_walk_m * 1.6)
 
         dsnap = ddist = dprev = None
+        warnings = []
         if origin is not None:
             dsnap = self._snap_drive(origin)
             if dsnap and dsnap["sources"]:
                 ddist, dprev = dijkstra(self.m.drive_adj, dsnap["sources"])
+            else:
+                warnings.append("origin_outside_network")
 
         scored, unreachable = [], 0
         for c in cands:
@@ -223,7 +234,7 @@ class Recommender:
                 continue
             arr = None
             if ddist is not None:
-                arr = self._arrival(c, ddist)
+                arr = self._arrival(c, ddist, dsnap)
                 if arr is None:
                     unreachable += 1
                     continue
@@ -274,6 +285,7 @@ class Recommender:
             "diagnostics": {"candidates_in_radius": considered, "unreachable_by_car": unreachable,
                             "ranked": len(scored), "max_walk_m": max_walk_m},
             "message": None if results else "no_verified_spot",
+            "warnings": warnings,
         }
 
     def nearest_stops(self, origin_lonlat, radius_m=1200, k=3):
@@ -286,7 +298,7 @@ class Recommender:
         cands = self._candidates(origin, radius_m, prefer="first_in_travel")
         scored = []
         for c in cands:
-            arr = self._arrival(c, ddist)
+            arr = self._arrival(c, ddist, dsnap)
             if arr is None:
                 continue
             c["arr"] = arr

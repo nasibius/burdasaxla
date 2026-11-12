@@ -21,6 +21,7 @@ from bisect import bisect_right
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from itertools import pairwise
 
 from pyproj import Transformer
 from shapely import STRtree
@@ -38,9 +39,9 @@ SIDES = ("right", "left")
 
 
 def to_ll_coords(coords):
-    xs, ys = zip(*coords)
+    xs, ys = zip(*coords, strict=True)
     lons, lats = TO_LL.transform(xs, ys)
-    return [[round(lo, 7), round(la, 7)] for lo, la in zip(lons, lats)]
+    return [[round(lo, 7), round(la, 7)] for lo, la in zip(lons, lats, strict=True)]
 
 
 def to_m_point(lon, lat):
@@ -58,6 +59,19 @@ def _num(v):
 def norm_text(s: str) -> str:
     table = str.maketrans("əıöüşçğİƏÖÜŞÇĞ", "eiouscgieouscg")
     return (s or "").translate(table).lower().strip()
+
+
+def is_bus_platform(t: dict) -> bool:
+    """Bus/trolleybus platforms count for the 15 m rule; rail, metro and tram platforms do not."""
+    if t.get("bus") == "yes" or t.get("trolleybus") == "yes" or t.get("highway") in ("bus_stop", "platform"):
+        return True
+    if t.get("railway") or any(t.get(k) == "yes" for k in ("train", "subway", "tram", "light_rail", "monorail")):
+        return False
+    return True
+
+
+def flip(side: str) -> str:
+    return "left" if side == "right" else "right"
 
 
 @dataclass
@@ -154,7 +168,7 @@ class CityModel:
                 self.raw_ways.append(el)
         ids = list(self.nodes)
         xs, ys = TO_M.transform([self.nodes[i]["lon"] for i in ids], [self.nodes[i]["lat"] for i in ids])
-        self.xy = {i: (x, y) for i, x, y in zip(ids, xs, ys)}
+        self.xy = {i: (x, y) for i, x, y in zip(ids, xs, ys, strict=True)}
 
     def _way_ok_for_drive(self, t):
         hw = t.get("highway")
@@ -198,7 +212,7 @@ class CityModel:
             if line.length < 1:
                 continue
             cum = [0.0]
-            for a, b in zip(coords, coords[1:]):
+            for a, b in pairwise(coords):
                 cum.append(cum[-1] + math.dist(a, b))
             w = Way(el["id"], t, nds, line, cum, t["highway"], oneway, self._width(t, oneway),
                     t.get("name:az") or t.get("name") or t.get("name:en") or "")
@@ -214,7 +228,7 @@ class CityModel:
         # Service roads (yards, parking exits) are "adjacent territories", not intersections.
         nbrs = defaultdict(set)
         for w in self.ways.values():
-            for a, b in zip(w.nodes, w.nodes[1:]):
+            for a, b in pairwise(w.nodes):
                 nbrs[a].add(b)
                 nbrs[b].add(a)
         self.intersections = {n for n, s in nbrs.items() if len(s) >= 3}
@@ -238,7 +252,7 @@ class CityModel:
         edge_geoms, self.drive_edge_meta = [], []
         for w in self.drive_ways.values():
             sp = w.speed()
-            for i, (a, b) in enumerate(zip(w.nodes, w.nodes[1:])):
+            for i, (a, b) in enumerate(pairwise(w.nodes)):
                 L = w.cum[i + 1] - w.cum[i]
                 self.drive_adj[a].append((b, L / sp, L, w.id))
                 self.drive_edges.add((a, b))
@@ -261,7 +275,7 @@ class CityModel:
             if t.get("access") in ("private", "no") and t.get("foot") not in ("yes", "designated"):
                 continue
             nds = [n for n in el["nodes"] if n in self.xy]
-            for a, b in zip(nds, nds[1:]):
+            for a, b in pairwise(nds):
                 L = math.dist(self.xy[a], self.xy[b])
                 self.walk_adj[a].append((b, L))
                 self.walk_adj[b].append((a, L))
@@ -293,13 +307,12 @@ class CityModel:
         self.bus_stops = []
         for nid, el in self.nodes.items():
             t = el.get("tags", {})
-            if t.get("highway") == "bus_stop" or (t.get("public_transport") == "platform" and
-                                                  (t.get("bus") == "yes" or t.get("highway") == "bus_stop" or "bus" not in t)):
+            if t.get("highway") == "bus_stop" or (t.get("public_transport") == "platform" and is_bus_platform(t)):
                 self.bus_stops.append({"ref": f"node/{nid}", "pt": Point(self.xy[nid]), "on_road": nid in road_nodes,
                                        "name": t.get("name:az") or t.get("name") or "", "lonlat": [el["lon"], el["lat"]]})
         for el in self.raw_ways:
             t = el.get("tags", {})
-            if t.get("public_transport") == "platform" or t.get("highway") == "platform":
+            if (t.get("public_transport") == "platform" or t.get("highway") == "platform") and is_bus_platform(t):
                 nds = [n for n in el["nodes"] if n in self.xy]
                 if len(nds) >= 2:
                     c = LineString([self.xy[n] for n in nds]).centroid
@@ -408,10 +421,14 @@ class CityModel:
             bs["way_id"], bs["pos"] = w.id, pos
 
         # Curated features (verified only)
+        self.feature_errors = {}
         for f in self.features:
             if f["status"] != "verified":
                 continue
-            self._apply_feature(f, add)
+            try:
+                self._apply_feature(f, add)
+            except Exception as exc:  # noqa: BLE001 - one bad row must not take the map down
+                self.feature_errors[f["id"]] = str(exc)
 
         self.intervals = iv
 
@@ -487,13 +504,7 @@ class CityModel:
             side = props.get("side") or w.side_of(pt)
             pos = w.line.project(pt)
             if kind in ("sign_3_27", "sign_3_28"):
-                zl = props.get("zone_length_m")
-                inter = sorted(p for n, ps in w.node_pos.items() if n in self.intersections for p in ps)
-                if w.travel(side) == "fwd":
-                    end = pos + zl if zl else next((p for p in inter if p > pos + 1), w.length)
-                    return [(w, side, pos, end)]
-                start = pos - zl if zl else next((p for p in reversed(inter) if p < pos - 1), 0.0)
-                return [(w, side, start, pos)]
+                return self._sign_zone(w, side, pos, props.get("zone_length_m"))
             half = float(props.get("half_length_m", 10))
             return [(w, side, pos - half, pos + half)]
         if g["type"] == "LineString":
@@ -523,6 +534,48 @@ class CityModel:
                             out.append((w, side, min(a, b), max(a, b)))
             return out
         return []
+
+    def _sign_zone(self, w, side, pos, zone_len=None, max_len=1000.0):
+        """Sign zone in the direction of traffic, up to the next intersection.
+
+        OSM often splits one street into several ways without an intersection;
+        the zone then continues onto the next way, keeping the same physical curb.
+        """
+        out = []
+        remaining = float(zone_len) if zone_len else max_len
+        forward = w.travel(side) == "fwd"
+        for _ in range(12):
+            inter = sorted(p for n, ps in w.node_pos.items() if n in self.intersections for p in ps)
+            if forward:
+                stop = next((p for p in inter if p > pos + 1), None)
+                end = min(stop if stop is not None else w.length, pos + remaining)
+                out.append((w, side, pos, end))
+                remaining -= end - pos
+                node = w.nodes[-1]
+            else:
+                stop = next((p for p in reversed(inter) if p < pos - 1), None)
+                start = max(stop if stop is not None else 0.0, pos - remaining)
+                out.append((w, side, start, pos))
+                remaining -= pos - start
+                node = w.nodes[0]
+            if stop is not None or remaining <= 0.5 or node in self.intersections:
+                break
+            side_rel = side if forward else flip(side)  # curb side relative to the movement
+            nxt = [self.ways[i] for i in self.node_ways[node] if i != w.id and i in self.ways]
+            if len(nxt) != 1:
+                break
+            w2 = nxt[0]
+            if w2.nodes[0] == node:
+                fwd2, pos2 = True, 0.0
+            elif w2.nodes[-1] == node:
+                fwd2, pos2 = False, w2.length
+            else:
+                break
+            side2 = side_rel if fwd2 else flip(side_rel)
+            if (w2.travel(side2) == "fwd") != fwd2:  # traffic on that curb flows the other way
+                break
+            w, side, pos, forward = w2, side2, pos2, fwd2
+        return out
 
     def _apply_feature(self, f, add):
         matches = self.match_feature(f)
@@ -557,7 +610,7 @@ class CityModel:
                     cuts.update((a, b))
                 cuts = sorted(c for c in cuts if 0 <= c <= w.length)
                 pieces = []
-                for a, b in zip(cuts, cuts[1:]):
+                for a, b in pairwise(cuts):
                     if b - a < 0.3:
                         continue
                     m = (a + b) / 2
@@ -715,6 +768,19 @@ class CityModel:
                                                                  sorted(by_rule.items(), key=lambda x: -x[1])},
                 "ways": len(self.ways), "crossings": len(self.crossing_nodes), "bus_stops": len(self.bus_stops),
                 "intersections": len(self.intersections), "signals": len(self.signal_nodes)}
+
+    def segments_geojson(self, status=None):
+        feats = []
+        for seg in self.segments.values():
+            if status and seg["status"] != status:
+                continue
+            feats.append({"type": "Feature", "id": seg["id"],
+                          "geometry": {"type": "LineString", "coordinates": seg["coords"]},
+                          "properties": {"id": seg["id"], "status": seg["status"], "name": seg["name"],
+                                         "side": seg["side"], "compass": seg["compass"], "length_m": seg["length_m"],
+                                         "rules": sorted({r["rule"] for r in seg["reasons"]}),
+                                         "official": seg["official"], "highway": seg["highway"]}})
+        return {"type": "FeatureCollection", "features": feats}
 
     def context_layers(self):
         def node_pt(n):

@@ -4,3 +4,5 @@ frontend/node_modules/
 frontend/dist/
 __pycache__/
 .pytest_cache/
+frontend/dist-static/
+frontend/public/static-data/

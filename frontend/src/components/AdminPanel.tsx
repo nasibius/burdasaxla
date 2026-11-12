@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api } from "../api";
+import { STATIC_MODE, api } from "../api";
 import type { CuratedFeature, FeatureKind, LngLat } from "../types";
 import { makeT, type Lang } from "../i18n";
 import { IAlert, ICheck, IShield, ITrash, IX, Logo } from "./Icons";
@@ -57,7 +57,7 @@ export default function AdminPanel(p: Props) {
       setTasks(tk); setAll(ls.filter((f) => f.status === "verified")); setAuthed(true); setErr(null);
     } catch (e: any) { setAuthed(false); setErr(e.message); }
   };
-  useEffect(() => { if (p.token) load(); /* eslint-disable-next-line */ }, [p.token, p.version]);
+  useEffect(() => { if (p.token && !STATIC_MODE) load(); /* eslint-disable-next-line */ }, [p.token, p.version]);
 
   useEffect(() => {
     setImpact(null);
@@ -104,7 +104,9 @@ export default function AdminPanel(p: Props) {
         </div>
       </div>
       <div className="panel-body">
-        {!authed ? (
+        {STATIC_MODE ? (
+          <div className="static-note">{t("static_admin")}</div>
+        ) : !authed ? (
           <form onSubmit={(e) => { e.preventDefault(); p.setToken(tokenInput); load(tokenInput); }}>
             <div className="field-label"><span>{t("admin_token")}</span></div>
             <div className="form-grid" style={{ marginTop: 0 }}>

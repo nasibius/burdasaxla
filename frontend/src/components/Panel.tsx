@@ -31,6 +31,11 @@ interface Props {
   onOpenSegment: (id: string) => void;
 }
 
+const kindLabel = (k: string, t: (k: string) => string) => {
+  const v = t("kindl_" + k);
+  return v === "kindl_" + k ? k.replace(/_/g, " ") : v;
+};
+
 const kindIcon = (k: string) =>
   k === "street" ? <IMap size={16} /> : ["station", "stop_position", "subway_entrance"].includes(k) ? <ITrain size={16} />
     : ["platform", "bus_station", "bus_stop"].includes(k) ? <IBus size={16} /> : <IBuilding size={16} />;
@@ -85,7 +90,7 @@ function SearchBox({ lang, value, onChange, onPick, picking, onTogglePick, onCle
               <span className="s-ic">{kindIcon(it.kind)}</span>
               <span style={{ minWidth: 0 }}>
                 <div className="s-name">{it.name}</div>
-                <div className="s-kind">{it.kind.replace(/_/g, " ")}{it.alt[0] ? ` · ${it.alt[0]}` : ""}</div>
+                <div className="s-kind">{kindLabel(it.kind, t)}{it.alt[0] ? ` · ${it.alt[0]}` : ""}</div>
               </span>
             </button>
           ))}
@@ -223,6 +228,7 @@ export default function Panel(p: Props) {
               <h4>{t("results")}</h4>
               {p.loading ? <small>{t("finding")}</small> : p.resp?.diagnostics && <small>{p.resp.diagnostics.ranked} / {p.resp.diagnostics.candidates_in_radius}</small>}
             </div>
+            {p.resp?.warnings?.map((w) => <div key={w} className="warn-line"><IAlert size={13} />{t("warn_" + w)}</div>)}
             {p.resp?.results.map((r) => (
               <ResultCard key={r.rank + r.segment_id} r={r} lang={p.lang} mode={p.mode} sel={p.selectedRank === r.rank}
                 onClick={() => p.onSelectRank(r.rank)} onOpenSegment={() => p.onOpenSegment(r.segment_id)} />
@@ -230,7 +236,7 @@ export default function Panel(p: Props) {
             {!p.loading && p.resp && p.resp.results.length === 0 && (
               <div className="empty">
                 <div className="e-ic"><IBan size={22} /></div>
-                <h4>{t("no_spot")}</h4>
+                <h4>{p.resp.message && p.resp.message !== "no_verified_spot" ? t("msg_" + p.resp.message) : t("no_spot")}</h4>
                 <p>{t("no_spot_hint")}</p>
               </div>
             )}
@@ -242,7 +248,7 @@ export default function Panel(p: Props) {
       </div>
       <div className="panel-foot">
         <span>{totalKm.toFixed(1)} {t("stat_curb")}</span>
-        <span>OSM · {p.meta?.ruleset}</span>
+        <span>{p.meta?.mode === "static" ? `${t("static_badge")} · ` : ""}OSM · {p.meta?.ruleset}</span>
       </div>
     </section>
   );

@@ -65,7 +65,7 @@ export default function SegmentDrawer({ seg, lang, onClose }: { seg: Segment; la
           <dt>{t("sources")}</dt><dd>{seg.sources.map((s) => t("src_" + s)).join(", ")}</dd>
           <dt>{t("last_verified")}</dt><dd>{fmtDate(seg.last_verified)}</dd>
           <dt>{t("osm_snapshot")}</dt><dd>{fmtDate(seg.osm_timestamp)}</dd>
-          <dt>{t("traffic")}</dt><dd>{seg.oneway ? "↑ oneway" : "⇅"} · {t(seg.travel === "fwd" ? "with_way" : "against_way")}</dd>
+          <dt>{t("traffic")}</dt><dd>{seg.oneway ? `↑ ${t("oneway")}` : `⇅ ${t("twoway")}`}</dd>
           <dt>{t("ruleset")}</dt><dd>{seg.ruleset_version}</dd>
           <dt>OSM</dt><dd><a href={`https://www.openstreetmap.org/${seg.osm_ref}`} target="_blank" rel="noreferrer">{seg.osm_ref} <IExternal size={11} /></a></dd>
         </dl>

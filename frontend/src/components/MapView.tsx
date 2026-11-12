@@ -61,9 +61,13 @@ function segWeight(z: number) {
 }
 
 function SegmentsLayer({ data, theme, onSelect, lang, selectedId }: {
-  data: SegFeature[]; theme: "dark" | "light"; onSelect: (id: string) => void; lang: Lang; selectedId?: string | null;
+  data: SegFeature[]; theme: "dark" | "light"; onSelect: (id: string, at: LngLat) => void; lang: Lang; selectedId?: string | null;
 }) {
   const map = useMap();
+  // Keep the latest handler in a ref: the Leaflet layer is built once per data/theme change,
+  // so a captured callback would go stale (e.g. ignore picking/drawing mode).
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
   const layerRef = useRef<L.GeoJSON | null>(null);
   const t = makeT(lang);
   const renderer = useMemo(() => L.canvas({ padding: 0.4, tolerance: 6 }), []);
@@ -92,7 +96,7 @@ function SegmentsLayer({ data, theme, onSelect, lang, selectedId }: {
         lyr.on("mouseout", (e: any) => layer.resetStyle(e.target));
         lyr.on("click", (e: L.LeafletMouseEvent) => {
           L.DomEvent.stopPropagation(e);
-          onSelect(p.id);
+          onSelectRef.current(p.id, [e.latlng.lng, e.latlng.lat]);
         });
       },
     });
@@ -162,7 +166,7 @@ export interface MapProps {
   fitMaxZoom?: number;
   draft?: { kind: string; coords: LngLat[] } | null;
   onMapClick: (c: LngLat) => void;
-  onSelectSegment: (id: string) => void;
+  onSelectSegment: (id: string, at: LngLat) => void;
   onSelectRank: (rank: number) => void;
   onMoveDestination: (c: LngLat) => void;
   onMoveOrigin: (c: LngLat) => void;

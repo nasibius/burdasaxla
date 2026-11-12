@@ -10,7 +10,9 @@ DB_PATH = Path(os.environ.get("BURDASAXLA_DB", DATA_DIR / "burdasaxla.sqlite3"))
 # Metric CRS for all distance maths: UTM zone 39N covers Baku.
 METRIC_CRS = "EPSG:32639"
 
-ADMIN_TOKEN = os.environ.get("BURDASAXLA_ADMIN_TOKEN", "burdasaxla-admin")
+DEFAULT_ADMIN_TOKEN = "burdasaxla-admin"
+ADMIN_TOKEN = os.environ.get("BURDASAXLA_ADMIN_TOKEN", DEFAULT_ADMIN_TOKEN)
+NO_DEMO_SEED = os.environ.get("BURDASAXLA_NO_DEMO_SEED") == "1"
 
 # Roads that get curb segments (both sides modelled).
 CURB_HIGHWAYS = {

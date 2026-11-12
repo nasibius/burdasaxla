@@ -9,6 +9,8 @@ the 28 May area of Baku. It also recommends where a driver can legally drop off 
 
 Legal decisions are made by a **deterministic rule engine** (Python + Shapely). No AI is involved.
 
+**Live demo:** https://nasibius.github.io/burdasaxla/ (static build, see [Hosting](#hosting)).
+
 ---
 
 ## Quick start
@@ -19,7 +21,7 @@ Requirements: Python 3.11+ and Node 18+.
 # 1. Backend
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest -q                         # 18 tests
+.venv/bin/python -m pytest -q                         # 30 tests
 .venv/bin/uvicorn app.main:app --port 8000 --reload   # http://localhost:8000/docs
 ```
 
@@ -39,6 +41,54 @@ http://localhost:8000.
   Overpass API first, then falls back to the main OSM API (`/api/0.6/map`).
 * Basemap: Esri Canvas tiles by default (no key needed). To use CARTO or MapTiler with your own key, set
   `VITE_TILE_DARK` / `VITE_TILE_LIGHT` (and optionally `VITE_TILE_LABELS_*`).
+
+## Hosting
+
+There are two ways to run it:
+
+| | Static demo (GitHub Pages) | Full app (API) |
+|---|---|---|
+| URL | https://nasibius.github.io/burdasaxla/ | your own host (Render, Docker, VM) |
+| Map, reasons, search, drop-off / pick-up / driver recommendations | ✅ | ✅ |
+| Admin panel, validation queue, conflict detection | — (read-only) | ✅ |
+| Deploy | automatic on every push to `main` (`.github/workflows/pages.yml`) | `docker build` / Render blueprint |
+
+**How the static demo works.** On deploy, the Python rule engine runs in CI (`backend/scripts/export_static.py`).
+It writes every curb status and reason, plus compact road and walk graphs, to JSON. Legal decisions therefore still come
+from Python. In the browser, `frontend/src/static/engine.ts` runs the routing and ranking part of the recommender. It is a
+line-by-line port of `dropoff.py` and is checked against the API on 40 random trips: the top drop-off pick matches
+40/40 and walking distance is within 2 m. Driver mode matches 37/40; the three differences are equal-time ties at
+OSM way splits.
+
+**Running the full app with the API:**
+
+```bash
+docker build -t burdasaxla .
+docker run -p 8000:8000 -e BURDASAXLA_ADMIN_TOKEN=change-me -v burdasaxla-data:/data burdasaxla
+```
+
+On Render: *New → Blueprint →* pick this repo. `render.yaml` creates a free web service and generates a random admin
+token, which you can see in the service's Environment tab. The free plan has no persistent disk, so curated features
+are reset whenever the service restarts. Attach a disk at `/data` to keep them.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `BURDASAXLA_ADMIN_TOKEN` | `burdasaxla-admin` (logged as a warning) | Admin API token |
+| `BURDASAXLA_DB` | `backend/data/burdasaxla.sqlite3` | SQLite file for curated features |
+| `BURDASAXLA_OSM` | `backend/data/osm_raw.json` | OSM snapshot |
+| `BURDASAXLA_NO_DEMO_SEED` | unset | `1` = don't create the demo survey area |
+| `VITE_STATIC`, `VITE_BASE` | unset, `/` | Build the static variant / set its public path |
+
+## Quality checks
+
+* `backend`: `ruff check app tests scripts` and `pytest -q` (30 tests: rule geometry, recommender, API, security
+  and regression cases). Both run in CI (`.github/workflows/ci.yml`) along with the frontend type-check and build.
+* Inputs are validated. Out-of-range coordinates get a 422. A destination outside the area gets `outside_area`. A driver
+  outside the area or off the road network gets a `warnings` entry instead of a silently missing car route.
+* Admin geometry is checked for type, validity and being inside the modelled area *before* it is stored. A bad row that
+  was stored earlier is skipped during a rebuild and reported in `feature_errors`, so it can't take the map down.
+* Static file serving is confined to `frontend/dist` (blocks path traversal). Unknown `/api/*` paths return a JSON
+  404. The admin token is compared in constant time.
 
 ## Features
 
@@ -79,12 +129,12 @@ date and confidence.
 |---|---|---|
 | Pedestrian crossing | prohibit | on the crossing + **5 m before it in the direction of travel** (so the two sides differ) |
 | Intersection | prohibit | ± (half-width of the crossed road + 5 m); yard/driveway exits are excluded (adjacent territory) |
-| Bus stop | prohibit | ±15 m around the stop sign/platform, **only on the stop's side** |
+| Bus stop | prohibit | ±15 m around the stop sign/platform, **only on the stop's side** (rail/metro platforms excluded) |
 | Bus lane | prohibit | OSM `lanes:bus`, `bus:lanes`, `psv:lanes`, `busway:*`, or added by an admin |
 | Bridge / tunnel, under bridge | prohibit | whole way / footprint of the overpass |
 | Motorway, roundabout, level crossing | prohibit | whole way / ±10 m |
 | Traffic signal | prohibit | 10 m before the signal (approximation of the "do not hide the signal" rule) |
-| Sign 3.27 | prohibit | from the sign to the next intersection, on that side |
+| Sign 3.27 | prohibit | from the sign to the next intersection, on that side, continuing across OSM way splits |
 | Marking 1.4 (solid yellow) | prohibit | the drawn extent |
 | OSM `parking:*=no_stopping` | prohibit | that side |
 | Sign 3.28, marking 1.10, OSM `no_parking` | **info** | parking is banned, but a short stop is allowed, so these do *not* turn a curb red |

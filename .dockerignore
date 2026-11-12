@@ -1,0 +1,9 @@
+**/.venv
+**/node_modules
+**/__pycache__
+**/.pytest_cache
+**/*.sqlite3
+frontend/dist
+frontend/dist-static
+frontend/public/static-data
+.git

@@ -1,0 +1,12 @@
+line-length = 130
+target-version = "py311"
+
+[lint]
+select = ["E", "F", "W", "B", "UP", "SIM", "I"]
+ignore = ["UP017", "SIM103", "SIM108"]  # keep timezone.utc; explicit if/return reads better for rule predicates
+
+[lint.per-file-ignores]
+"tests/*" = ["E501"]
+
+[lint.isort]
+known-first-party = ["app", "tests"]

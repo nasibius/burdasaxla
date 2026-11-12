@@ -56,6 +56,7 @@ export interface Meta {
   built_at: string;
   build_ms: number;
   ruleset: string;
+  mode?: "api" | "static";
   stats: {
     by_status: Record<Status, { count: number; length_m: number }>;
     prohibited_length_by_rule: Record<string, number>;
@@ -101,6 +102,7 @@ export interface RecResponse {
   curb_at_door?: DoorInfo | null;
   diagnostics?: { candidates_in_radius: number; unreachable_by_car: number; ranked: number; max_walk_m: number };
   message: string | null;
+  warnings?: string[];
 }
 
 export interface Context {
