@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { STATIC_MODE, api } from "./api";
+import { ADMIN_URL, STATIC_MODE, api } from "./api";
 import AuthorityPanel from "./components/AuthorityPanel";
 import AdminPanel, { TOOL_GEOM } from "./components/AdminPanel";
 import { IInfo, ILayers, IMap, IMoon, IShield, ISun, IX, Logo } from "./components/Icons";
@@ -230,9 +230,9 @@ export default function App() {
         <button className="tb-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="theme">
           {theme === "dark" ? <ISun size={17} /> : <IMoon size={17} />}
         </button>
-        <button className="tb-btn" onClick={() => { location.hash = view === "admin" ? "" : "#admin"; setSegDetail(null); }}>
+        <a className="tb-btn" href={view === "admin" ? "#" : STATIC_MODE && ADMIN_URL ? ADMIN_URL : "#admin"} onClick={() => setSegDetail(null)}>
           {view === "admin" ? <IMap size={17} /> : <IShield size={17} />}<span className="lbl">{view === "admin" ? t("map") : t("admin")}</span>
-        </button>
+        </a>
       </div>
 
       {view !== "authority" && layersOpen && (

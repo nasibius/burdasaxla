@@ -7,6 +7,8 @@ const env = (import.meta as any).env ?? {};
 const BASE = env.VITE_API_BASE ?? "";
 /** Static mode: no backend; data comes from precomputed JSON (GitHub Pages build). */
 export const STATIC_MODE = env.VITE_STATIC === "1";
+/** Full backend admin URL for deployments whose map is hosted statically. */
+export const ADMIN_URL: string = env.VITE_ADMIN_URL ?? "";
 const DATA = `${env.BASE_URL ?? "/"}static-data/`;
 
 async function req<T>(path: string, init?: RequestInit & { token?: string }): Promise<T> {
