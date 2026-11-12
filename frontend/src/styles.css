@@ -415,7 +415,7 @@ a:hover { text-decoration: underline; }
 .seg-ctl.small { margin-top: 12px; position: relative; }
 .seg-ctl.small button { padding: 6px 4px; font-size: 12px; }
 .seg-ctl.two { grid-template-columns: 1fr 1fr; margin-top: 0; }
-.seg-ctl.four { grid-template-columns: repeat(4, 1fr); }
+.seg-ctl.small.four { grid-template-columns: repeat(4, 1fr); }
 .card.unverified { border-color: color-mix(in srgb, var(--unk) 35%, transparent); background: linear-gradient(180deg, var(--unk-soft), transparent 70%), var(--raise); }
 .card.unverified .rank { background: var(--unk); color: #1a1200; }
 .card.unverified.sel { border-color: var(--unk); box-shadow: 0 0 0 3px var(--unk-soft); }

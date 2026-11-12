@@ -26,7 +26,7 @@ export default function RulesPanel({ catalog, lang, onClose }: { catalog: RuleCa
             <div className="muted" style={{ fontSize: 11.5 }}>{catalog.law.version_note} · {catalog.version}</div>
           </div>
         </div>
-        <div className="seg-ctl small">
+        <div className="seg-ctl small four">
           {(["all", "prohibit", "caution", "info"] as const).map((f) => (
             <button key={f} className={filter === f ? "on" : ""} onClick={() => setFilter(f)}>
               {f === "all" ? "∗" : t("eff_" + f)}
