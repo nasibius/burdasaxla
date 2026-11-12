@@ -144,6 +144,15 @@ function ResultCard({ r, lang, sel, mode, onClick, onOpenSegment }: {
 export default function Panel(p: Props) {
   const t = makeT(p.lang);
   const [collapsed, setCollapsed] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const resultsRef = useRef<HTMLDivElement>(null);
+  // On phones the form fills the bottom sheet: bring fresh results into view.
+  useEffect(() => {
+    if (!p.resp || window.innerWidth > 760) return;
+    setCollapsed(false);
+    const body = bodyRef.current, target = resultsRef.current;
+    if (body && target) body.scrollTo({ top: target.offsetTop - 8, behavior: "smooth" });
+  }, [p.resp]);
   const stats = p.meta?.stats.by_status;
   const totalKm = stats ? Object.values(stats).reduce((a, s) => a + s.length_m, 0) / 1000 : 0;
   const door = p.resp?.curb_at_door;
@@ -170,7 +179,7 @@ export default function Panel(p: Props) {
         </div>
       </div>
 
-      <div className="panel-body">
+      <div className="panel-body" ref={bodyRef}>
         <div className="mode-hint" style={{ marginTop: 0 }}>{t("mode_" + p.mode + "_hint")}</div>
 
         {p.mode !== "driver" && <>
@@ -210,6 +219,7 @@ export default function Panel(p: Props) {
           </div>
         )}
 
+        <div ref={resultsRef} />
         {hasQuery && p.mode !== "driver" && door && (
           <div className={`door ${door.status}`} onClick={() => p.onOpenSegment(door.segment_id)} role="button">
             <span className="d-ic">{door.status === "PROHIBITED" ? <IBan size={16} /> : door.status === "VERIFIED" ? <ICheck size={16} /> : <IHelp size={16} />}</span>
