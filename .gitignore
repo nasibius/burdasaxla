@@ -7,3 +7,4 @@ __pycache__/
 frontend/dist-static/
 frontend/public/static-data/
 *.tsbuildinfo
+backend/data/evidence/

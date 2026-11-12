@@ -1,7 +1,9 @@
 fastapi==0.162.5
 httpx==0.28.1
+pillow==13.0.0
 pydantic==2.14.3
 pyproj==3.8.0
 pytest==9.2.0
+python-multipart==0.0.33
 shapely==2.2.0
 uvicorn==0.54.0

@@ -5,6 +5,9 @@ target-version = "py311"
 select = ["E", "F", "W", "B", "UP", "SIM", "I"]
 ignore = ["UP017", "SIM103", "SIM108"]  # keep timezone.utc; explicit if/return reads better for rule predicates
 
+[lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.File", "fastapi.Depends", "fastapi.Query", "fastapi.Header"]
+
 [lint.per-file-ignores]
 "tests/*" = ["E501"]
 

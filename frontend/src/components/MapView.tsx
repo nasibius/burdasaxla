@@ -5,8 +5,8 @@ import type { Context, CuratedFeature, LngLat, Recommendation, SegFeature, Statu
 import { makeT, ruleTitle, type Lang } from "../i18n";
 
 export const STATUS_COLORS: Record<"dark" | "light", Record<Status, string>> = {
-  dark: { PROHIBITED: "#ff5468", VERIFIED: "#2fd581", UNKNOWN: "#7d879c" },
-  light: { PROHIBITED: "#e5334a", VERIFIED: "#10a85c", UNKNOWN: "#9aa3b5" },
+  dark: { PROHIBITED: "#ff5468", ALLOWED: "#2fd581", UNVERIFIED: "#f5b82e" },
+  light: { PROHIBITED: "#e5334a", ALLOWED: "#10a85c", UNVERIFIED: "#d99a00" },
 };
 
 const ENV = (import.meta as any).env ?? {};
@@ -39,8 +39,11 @@ const carIcon = L.divIcon({
   iconAnchor: [19, 19],
   html: `<div class="pin-pulse"></div><div class="pin-car"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17h14v-4.5l-1.8-4.6A2 2 0 0 0 15.3 6.5H8.7a2 2 0 0 0-1.9 1.4L5 12.5z"/><path d="M5 12.5h14"/></svg></div>`,
 });
-const rankIcon = (n: number, sel: boolean) =>
-  L.divIcon({ className: "pin", iconSize: [30, 30], iconAnchor: [15, 15], html: `<div class="pin-rank ${sel ? "sel" : ""}">${n}</div>` });
+const rankIcon = (label: string, sel: boolean, unverified: boolean) =>
+  L.divIcon({ className: "pin", iconSize: [30, 30], iconAnchor: [15, 15],
+    html: `<div class="pin-rank ${sel ? "sel" : ""} ${unverified ? "unverified" : ""}">${label}</div>` });
+
+export type MapResult = Recommendation & { key: string; unverified?: boolean };
 const signIcon = (kind: string, pending: boolean) =>
   L.divIcon({
     className: "pin", iconSize: [26, 26], iconAnchor: [13, 13],
@@ -53,8 +56,15 @@ const LINE_STYLE: Record<string, L.PathOptions> = {
   marking_1_4: { color: "#facc15", weight: 4, opacity: 0.95 },
   marking_1_10: { color: "#facc15", weight: 4, opacity: 0.95, dashArray: "8 7" },
   bus_lane: { color: "#f97316", weight: 5, opacity: 0.85 },
+  taxi_stand: { color: "#fde047", weight: 6, opacity: 0.9, dashArray: "2 6" },
+  observed_prohibition: { color: "#ff5468", weight: 5, opacity: 0.85, dashArray: "10 5" },
   official_zone: { color: "#22d3ee", weight: 7, opacity: 0.9 },
 };
+
+const cameraIcon = L.divIcon({
+  className: "pin", iconSize: [22, 22], iconAnchor: [11, 11],
+  html: `<div style="width:22px;height:22px;border-radius:50%;background:#0f1528;border:2px solid #fff;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,.4)"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.2"/></svg></div>`,
+});
 
 function segWeight(z: number) {
   return z >= 18 ? 6 : z >= 17 ? 4.5 : z >= 16 ? 3.4 : 2.4;
@@ -77,7 +87,7 @@ function SegmentsLayer({ data, theme, onSelect, lang, selectedId }: {
     const style = (f?: GeoJSON.Feature): L.PathOptions => {
       const st = (f?.properties as any)?.status as Status;
       return {
-        color: colors[st], weight: segWeight(map.getZoom()), opacity: st === "UNKNOWN" ? 0.75 : 0.95,
+        color: colors[st], weight: segWeight(map.getZoom()), opacity: st === "UNVERIFIED" ? 0.8 : 0.95,
         lineCap: "butt", renderer,
       };
     };
@@ -85,7 +95,8 @@ function SegmentsLayer({ data, theme, onSelect, lang, selectedId }: {
       style,
       onEachFeature: (f, lyr) => {
         const p = f.properties as SegFeature["properties"];
-        const rules = p.rules.length ? p.rules.map((r) => ruleTitle(r, lang)).join(" · ") : "";
+        const shown = p.rules.length ? p.rules : (p.cautions ?? []);
+        const rules = shown.slice(0, 3).map((r) => ruleTitle(r, lang)).join(" · ");
         lyr.bindTooltip(
           `<div class="tip-st" style="color:${colors[p.status]}">${t("st_" + p.status)}</div><b>${p.name || "—"}</b>` +
           `<div style="color:var(--muted)">${t("dir_" + (p as any).compass)} · ${Math.round(p.length_m)} m</div>` +
@@ -157,17 +168,20 @@ export interface MapProps {
   layers: { segments: boolean; stops: boolean; crossings: boolean; features: boolean };
   destination: LngLat | null;
   origin: LngLat | null;
-  results: Recommendation[];
-  selectedRank: number | null;
+  results: MapResult[];
+  selectedKey: string | null;
   selectedSegment: string | null;
   picking: boolean;
   fitPoints: LngLat[];
   fitToken: number;
   fitMaxZoom?: number;
   draft?: { kind: string; coords: LngLat[] } | null;
+  /** Photo evidence: where the camera was vs. where the sign is (never the same thing). */
+  cameraMarks?: { camera: LngLat; target: LngLat; heading?: number | null }[];
+  highlightFeature?: number | null;
   onMapClick: (c: LngLat) => void;
   onSelectSegment: (id: string, at: LngLat) => void;
-  onSelectRank: (rank: number) => void;
+  onSelectKey: (key: string) => void;
   onMoveDestination: (c: LngLat) => void;
   onMoveOrigin: (c: LngLat) => void;
   onZoom: (z: number) => void;
@@ -175,9 +189,9 @@ export interface MapProps {
 }
 
 export default function MapView(p: MapProps) {
-  const sel = p.results.find((r) => r.rank === p.selectedRank) ?? null;
+  const sel = p.results.find((r) => r.key === p.selectedKey) ?? null;
   const brand = p.theme === "dark" ? "#5b8cff" : "#2f6bff";
-  const walk = p.theme === "dark" ? "#ffd166" : "#d98a00";
+  const walk = p.theme === "dark" ? "#c4a7ff" : "#7c3aed";  // not yellow: yellow means "unverified"
 
   return (
     <div className={`map ${p.picking ? "picking" : ""}`}>
@@ -201,7 +215,8 @@ export default function MapView(p: MapProps) {
 
         {p.layers.features && p.features.filter((f) => f.geometry.type === "LineString").map((f) => (
           <Polyline key={f.id} positions={(f.geometry.coordinates as LngLat[]).map(ll)}
-            pathOptions={{ ...(LINE_STYLE[f.kind] ?? {}), opacity: f.status === "pending" ? 0.5 : 0.95 }}>
+            pathOptions={{ ...(LINE_STYLE[f.kind] ?? {}), opacity: f.status === "pending" ? 0.55 : 0.95,
+              ...(f.status === "pending" ? { dashArray: "4 6" } : {}), ...(p.highlightFeature === f.id ? { weight: 9 } : {}) }}>
             <Tooltip className="seg-tip" sticky>{makeT(p.lang)("kind_" + f.kind)}{f.status === "pending" ? " · pending" : ""}</Tooltip>
           </Polyline>
         ))}
@@ -223,8 +238,8 @@ export default function MapView(p: MapProps) {
         ))}
 
         {/* routes: non-selected faint, selected bold */}
-        {p.results.filter((r) => r.rank !== p.selectedRank).map((r) => (
-          r.drive_route ? <Polyline key={"d" + r.rank} positions={r.drive_route.map(ll)} interactive={false}
+        {p.results.filter((r) => r.key !== p.selectedKey).map((r) => (
+          r.drive_route ? <Polyline key={"d" + r.key} positions={r.drive_route.map(ll)} interactive={false}
             pathOptions={{ color: brand, weight: 3, opacity: 0.25 }} /> : null
         ))}
         {sel?.drive_route && <>
@@ -237,8 +252,8 @@ export default function MapView(p: MapProps) {
         </>}
 
         {p.results.map((r) => (
-          <Marker key={"r" + r.rank} position={ll(r.point)} icon={rankIcon(r.rank, r.rank === p.selectedRank)}
-            zIndexOffset={r.rank === p.selectedRank ? 900 : 500} eventHandlers={{ click: () => p.onSelectRank(r.rank) }} />
+          <Marker key={r.key} position={ll(r.point)} icon={rankIcon(r.unverified ? "?" : String(r.rank), r.key === p.selectedKey, !!r.unverified)}
+            zIndexOffset={r.key === p.selectedKey ? 900 : r.unverified ? 400 : 500} eventHandlers={{ click: () => p.onSelectKey(r.key) }} />
         ))}
 
         {p.destination && (
@@ -250,6 +265,14 @@ export default function MapView(p: MapProps) {
             eventHandlers={{ dragend: (e) => { const c = (e.target as L.Marker).getLatLng(); p.onMoveOrigin([c.lng, c.lat]); } }} />
         )}
 
+        {p.cameraMarks?.map((c, i) => (
+          <span key={"cam" + i}>
+            <Polyline positions={[ll(c.camera), ll(c.target)]} pathOptions={{ color: "#ffffff", weight: 1.5, dashArray: "3 5", opacity: 0.9 }} interactive={false} />
+            <Marker position={ll(c.camera)} icon={cameraIcon}>
+              <Tooltip className="seg-tip" direction="top">📷 {c.heading != null ? `${Math.round(c.heading)}°` : ""}</Tooltip>
+            </Marker>
+          </span>
+        ))}
         {p.draft && p.draft.coords.length > 0 && (
           p.draft.kind === "survey_area"
             ? <Polygon positions={p.draft.coords.map(ll)} pathOptions={{ color: brand, weight: 2, dashArray: "5 5", fillOpacity: 0.08 }} />

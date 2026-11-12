@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
-import type { LngLat, Meta, Mode, RecResponse, Recommendation, SearchItem } from "../types";
+import type { LngLat, Meta, Mode, RecResponse, Recommendation, SearchItem, VehicleClass } from "../types";
 import { fmtDist, makeT, ruleTitle, type Lang } from "../i18n";
 import {
   IAlert, IBan, IBuilding, IBus, ICar, ICheck, ICrosshair, IHelp, IInfo, ILocate, IMap, IPin, ISearch, IStar, ITrain, IWalk, IX, Logo,
@@ -26,9 +26,11 @@ interface Props {
   resp: RecResponse | null;
   loading: boolean;
   error: string | null;
-  selectedRank: number | null;
-  onSelectRank: (r: number) => void;
+  selectedKey: string | null;
+  onSelect: (key: string) => void;
   onOpenSegment: (id: string) => void;
+  vehicle: VehicleClass;
+  setVehicle: (v: VehicleClass) => void;
 }
 
 const kindLabel = (k: string, t: (k: string) => string) => {
@@ -100,19 +102,21 @@ function SearchBox({ lang, value, onChange, onPick, picking, onTogglePick, onCle
   );
 }
 
-function ResultCard({ r, lang, sel, mode, onClick, onOpenSegment }: {
-  r: Recommendation; lang: Lang; sel: boolean; mode: Mode; onClick: () => void; onOpenSegment: () => void;
+function ResultCard({ r, k, lang, sel, mode, unverified, onClick, onOpenSegment }: {
+  r: Recommendation; k: string; lang: Lang; sel: boolean; mode: Mode; unverified?: boolean; onClick: () => void; onOpenSegment: () => void;
 }) {
   const t = makeT(lang);
+  const flags = [...(r.reasons ?? []), ...(r.cautions ?? [])].map((x) => x.rule).filter((x) => x !== "NOT_SURVEYED");
   return (
-    <div className={`card ${sel ? "sel" : ""}`} onClick={onClick} role="button" tabIndex={0} onKeyDown={(e) => e.key === "Enter" && onClick()}>
+    <div className={`card ${sel ? "sel" : ""} ${unverified ? "unverified" : ""}`} onClick={onClick} role="button" tabIndex={0}
+      data-key={k} onKeyDown={(e) => e.key === "Enter" && onClick()}>
       <div className="card-top">
-        <div className="rank">{r.rank}</div>
+        <div className="rank">{unverified ? "?" : r.rank}</div>
         <div style={{ minWidth: 0 }}>
           <div className="street">{r.street || "—"}</div>
           <div className="sub">{t("dir_" + r.compass)}{r.length_m ? ` · ${t("free_length")} ${Math.round(r.length_m)} m` : ""}</div>
         </div>
-        {r.rank === 1 && <span className="best-tag">{t("rank_best")}</span>}
+        {!unverified && r.rank === 1 && <span className="best-tag">{t("rank_best")}</span>}
       </div>
       <div className="metrics">
         {mode !== "driver" && (
@@ -129,12 +133,16 @@ function ResultCard({ r, lang, sel, mode, onClick, onOpenSegment }: {
         )}
       </div>
       <div className="chips">
-        <span className="chip ok"><ICheck size={12} />{t("st_VERIFIED")}</span>
+        {unverified
+          ? <span className="chip unk"><IHelp size={12} />{t("st_UNVERIFIED")}</span>
+          : <span className="chip ok"><ICheck size={12} />{t("st_ALLOWED")}</span>}
         {r.official && <span className="chip brand"><IStar size={12} />{t("official")}</span>}
         {r.crossing && !r.crossing.must_cross && mode !== "driver" && <span className="chip">{t("same_side")}</span>}
         {r.crossing?.must_cross && r.crossing.safe_crossing && <span className="chip warn">{t("cross_safe")} · {r.crossing.crossing_distance_m} m</span>}
         {r.crossing?.must_cross && !r.crossing.safe_crossing && <span className="chip no"><IAlert size={12} />{t("cross_unsafe")}</span>}
+        {flags.map((f) => <span key={f} className="chip unk">{ruleTitle(f, lang)}</span>)}
         {r.notes.map((n) => <span key={n} className="chip" title={n}>{ruleTitle(n, lang)}</span>)}
+        <span className="chip" title={t("confidence")}>{t("conf_" + r.confidence)}</span>
         <span className="chip" style={{ cursor: "pointer" }} onClick={(e) => { e.stopPropagation(); onOpenSegment(); }}><IInfo size={12} />{t("why")}</span>
       </div>
     </div>
@@ -157,6 +165,8 @@ export default function Panel(p: Props) {
   const totalKm = stats ? Object.values(stats).reduce((a, s) => a + s.length_m, 0) / 1000 : 0;
   const door = p.resp?.curb_at_door;
   const hasQuery = p.mode === "driver" ? !!p.origin : !!p.destination;
+  const unverified = p.resp?.unverified_candidates ?? [];
+  const noGreen = stats ? stats.ALLOWED.length_m === 0 : false;
 
   return (
     <section className={`panel glass ${collapsed ? "collapsed" : ""}`}>
@@ -198,6 +208,15 @@ export default function Panel(p: Props) {
           <button className="sq-btn" onClick={p.onMyLocation} title={t("my_location")} aria-label={t("my_location")}><ILocate size={17} /></button>
         </div>
 
+        <div className="field-label"><span>{t("vehicle")}</span></div>
+        <div className="seg-ctl two" role="radiogroup" aria-label={t("vehicle")}>
+          {(["taxi", "private"] as VehicleClass[]).map((v) => (
+            <button key={v} role="radio" aria-checked={p.vehicle === v} className={p.vehicle === v ? "on" : ""} onClick={() => p.setVehicle(v)}>
+              {t("vehicle_" + v)}
+            </button>
+          ))}
+        </div>
+
         {p.mode !== "driver" && <>
           <div className="field-label"><span>{t("walk_limit")}</span><span>{p.maxWalk} m</span></div>
           <input className="range" type="range" min={100} max={1000} step={50} value={p.maxWalk} onChange={(e) => p.setMaxWalk(+e.target.value)} aria-label={t("walk_limit")} />
@@ -211,9 +230,9 @@ export default function Panel(p: Props) {
             <p>{p.mode === "driver" ? t("driver_start_hint") : t("start_hint")}</p>
             {stats && (
               <div className="stat-grid">
-                <div className="stat ok"><div className="v">{(stats.VERIFIED.length_m / 1000).toFixed(1)}</div><div className="l">km · {t("st_VERIFIED")}</div></div>
+                <div className="stat ok"><div className="v">{(stats.ALLOWED.length_m / 1000).toFixed(1)}</div><div className="l">km · {t("st_ALLOWED")}</div></div>
                 <div className="stat no"><div className="v">{(stats.PROHIBITED.length_m / 1000).toFixed(1)}</div><div className="l">km · {t("st_PROHIBITED")}</div></div>
-                <div className="stat unk"><div className="v">{(stats.UNKNOWN.length_m / 1000).toFixed(1)}</div><div className="l">km · {t("st_UNKNOWN")}</div></div>
+                <div className="stat unk"><div className="v">{(stats.UNVERIFIED.length_m / 1000).toFixed(1)}</div><div className="l">km · {t("st_UNVERIFIED")}</div></div>
               </div>
             )}
           </div>
@@ -222,11 +241,14 @@ export default function Panel(p: Props) {
         <div ref={resultsRef} />
         {hasQuery && p.mode !== "driver" && door && (
           <div className={`door ${door.status}`} onClick={() => p.onOpenSegment(door.segment_id)} role="button">
-            <span className="d-ic">{door.status === "PROHIBITED" ? <IBan size={16} /> : door.status === "VERIFIED" ? <ICheck size={16} /> : <IHelp size={16} />}</span>
+            <span className="d-ic">{door.status === "PROHIBITED" ? <IBan size={16} /> : door.status === "ALLOWED" ? <ICheck size={16} /> : <IHelp size={16} />}</span>
             <div>
-              <div className="d-t">{t(door.status === "PROHIBITED" ? "door_prohibited" : door.status === "VERIFIED" ? "door_ok" : "door_unknown")}</div>
+              <div className="d-t">{t(door.status === "PROHIBITED" ? "door_prohibited" : door.status === "ALLOWED" ? "door_ok" : "door_unknown")}</div>
               <div className="d-s">
-                {door.name}{door.reasons.length ? " — " + [...new Set(door.reasons.map((r) => ruleTitle(r.rule, p.lang)))].join(", ") : ""}
+                {door.name}
+                {(door.status === "PROHIBITED" ? door.reasons : door.cautions).length
+                  ? " — " + [...new Set((door.status === "PROHIBITED" ? door.reasons : door.cautions).map((r) => ruleTitle(r.rule, p.lang)))].join(", ")
+                  : ""}
               </div>
             </div>
           </div>
@@ -235,30 +257,40 @@ export default function Panel(p: Props) {
         {hasQuery && (
           <>
             <div className="results-head">
-              <h4>{t("results")}</h4>
-              {p.loading ? <small>{t("finding")}</small> : p.resp?.diagnostics && <small>{p.resp.diagnostics.ranked} / {p.resp.diagnostics.candidates_in_radius}</small>}
+              <h4>{t("confirmed_spots")}</h4>
+              {p.loading ? <small>{t("finding")}</small> : <small>{p.resp?.results.length ?? 0}</small>}
             </div>
             {p.resp?.warnings?.map((w) => <div key={w} className="warn-line"><IAlert size={13} />{t("warn_" + w)}</div>)}
             {p.resp?.results.map((r) => (
-              <ResultCard key={r.rank + r.segment_id} r={r} lang={p.lang} mode={p.mode} sel={p.selectedRank === r.rank}
-                onClick={() => p.onSelectRank(r.rank)} onOpenSegment={() => p.onOpenSegment(r.segment_id)} />
+              <ResultCard key={"c" + r.rank + r.segment_id} k={"c" + r.rank} r={r} lang={p.lang} mode={p.mode} sel={p.selectedKey === "c" + r.rank}
+                onClick={() => p.onSelect("c" + r.rank)} onOpenSegment={() => p.onOpenSegment(r.segment_id)} />
             ))}
             {!p.loading && p.resp && p.resp.results.length === 0 && (
-              <div className="empty">
-                <div className="e-ic"><IBan size={22} /></div>
-                <h4>{p.resp.message && p.resp.message !== "no_verified_spot" ? t("msg_" + p.resp.message) : t("no_spot")}</h4>
-                <p>{t("no_spot_hint")}</p>
+              <div className="empty soft">
+                <div className="e-ic"><IHelp size={22} /></div>
+                <h4>{p.resp.message && !["no_verified_spot"].includes(p.resp.message) ? t("msg_" + p.resp.message) : t("no_confirmed")}</h4>
+                <p>{t("no_confirmed_hint")}</p>
               </div>
+            )}
+            {unverified.length > 0 && (
+              <>
+                <div className="unverified-box"><IAlert size={14} /><span><b>{t("unverified_spots")}.</b> {t("unverified_warning")}</span></div>
+                <div style={{ height: 10 }} />
+                {unverified.map((r) => (
+                  <ResultCard key={"u" + r.rank + r.segment_id} k={"u" + r.rank} r={r} lang={p.lang} mode={p.mode} unverified
+                    sel={p.selectedKey === "u" + r.rank} onClick={() => p.onSelect("u" + r.rank)} onOpenSegment={() => p.onOpenSegment(r.segment_id)} />
+                ))}
+              </>
             )}
           </>
         )}
 
-        <div className="banner"><IInfo size={14} /><span>{t("demo_banner")}</span></div>
+        <div className="banner"><IInfo size={14} /><span>{noGreen ? t("no_green_banner") : t("demo_banner")}</span></div>
         <div className="mob-attr">© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer">OpenStreetMap</a> contributors · Basemap © Esri, HERE, Garmin · Leaflet</div>
       </div>
       <div className="panel-foot">
         <span>{totalKm.toFixed(1)} {t("stat_curb")}</span>
-        <span>{p.meta?.mode === "static" ? `${t("static_badge")} · ` : ""}OSM · {p.meta?.ruleset}</span>
+        <span>{p.meta?.mode === "static" ? `${t("static_badge")} · ` : ""}{p.meta?.ruleset}</span>
       </div>
     </section>
   );

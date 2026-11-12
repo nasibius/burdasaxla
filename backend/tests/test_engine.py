@@ -1,160 +1,251 @@
-"""Rule-engine and recommender tests on a tiny synthetic street network.
-
-Layout (metres, x east / y north), origin near 28 May:
-    Way 1  "Test küçəsi" residential, two-way  A(0,0)-B(100,0)-C(200,0)-D(300,0)
-           B is a zebra crossing, C an intersection.
-    Way 2  tertiary, oneway northbound         E(200,-100)-C(200,0)-F(200,100)
-    Way 3  residential bridge                  D(300,0)-G(400,0)
-    Bus stop sign at (60,-8)  -> south side = RIGHT side of way 1.
-"""
-import math
-
-import pytest
-
-from app.citymodel import PROHIBITED, UNKNOWN, VERIFIED, CityModel
-from app.dropoff import Recommender
-
-LAT0, LON0 = 40.38, 49.85
-M_LAT = 1 / 111_320
-M_LON = 1 / (111_320 * math.cos(math.radians(LAT0)))
+"""Rule engine tests (Law 517-IQ, verified text). Uses SYNTHETIC fixtures only — see tests/fixtures.py."""
+from app.citymodel import ALLOWED, PROHIBITED, UNVERIFIED, CityModel
+from tests.fixtures import line, main_street, node, obs, point, raw, rules_at, seg_at, survey, way
 
 
-def ll(x, y):
-    return LON0 + x * M_LON, LAT0 + y * M_LAT
+def model(features=(), **way_tags):
+    return CityModel(main_street(**way_tags), [survey(), *features])
 
 
-def node(i, x, y, **tags):
-    lon, lat = ll(x, y)
-    return {"type": "node", "id": i, "lon": lon, "lat": lat, "tags": tags}
+# ----------------------------------------------------------- 3-state model
+def test_missing_sign_data_is_yellow_not_green():
+    m = CityModel(main_street(), [])  # no survey, no signs
+    seg = seg_at(m, 101, "right", 20)
+    assert seg["status"] == UNVERIFIED
+    assert "NOT_SURVEYED" in {r["rule"] for r in seg["cautions"]}
 
 
-def build_raw():
-    els = [
-        node(1, 0, 0), node(2, 100, 0, highway="crossing"), node(3, 200, 0), node(4, 300, 0),
-        node(5, 200, -100), node(6, 200, 100), node(7, 400, 0),
-        node(8, 60, -8, highway="bus_stop", name="Test dayanacağı"),
-        {"type": "way", "id": 101, "nodes": [1, 2, 3, 4], "tags": {"highway": "residential", "name": "Test küçəsi"}},
-        {"type": "way", "id": 102, "nodes": [5, 3, 6], "tags": {"highway": "tertiary", "oneway": "yes", "name": "Bir"}},
-        {"type": "way", "id": 103, "nodes": [4, 7], "tags": {"highway": "residential", "bridge": "yes"}},
-    ]
-    s, w = ll(-200, -200)[1], ll(-200, -200)[0]
-    n, e = ll(600, 300)[1], ll(600, 300)[0]
-    return {"elements": els, "bbox": [s, w, n, e], "osm3s": {"timestamp_osm_base": "test"}}
+def test_surveyed_clear_curb_is_green():
+    seg = seg_at(model(), 101, "right", 20)
+    assert seg["status"] == ALLOWED and seg["confidence"] == "verified_observation"
 
 
-def survey(fid=1):
-    (w, s), (e, n) = ll(-100, -150), ll(500, 150)
-    return {"id": fid, "kind": "survey_area", "status": "verified", "source": "test", "verified_at": "2026-11-12",
-            "geometry": {"type": "Polygon", "coordinates": [[[w, s], [e, s], [e, n], [w, n], [w, s]]]}, "props": {}}
+def test_unverified_survey_does_not_make_green():
+    m = CityModel(main_street(), [survey(status="pending")])
+    assert seg_at(m, 101, "right", 20)["status"] == UNVERIFIED
 
 
-def status_at(m, way_id, side, pos):
-    for seg in m.segments_by_way[(way_id, side)]:
-        if seg["start_m"] <= pos < seg["end_m"]:
-            return seg
-    raise AssertionError(f"no segment at {pos}")
+# ---------------------------------------------- 52.IV.4 pedestrian crossings
+def test_crossing_is_5m_on_both_sides_of_the_crossing():
+    m = model()
+    # crossing node at 100 m, ±2 m crossing + 5 m => [93, 107] on BOTH curbs (v1 bug: only 'before')
+    for side in ("right", "left"):
+        for pos in (94, 100, 106):
+            assert "PEDESTRIAN_CROSSING" in rules_at(m, 101, side, pos), (side, pos)
+        assert seg_at(m, 101, side, 91)["status"] == ALLOWED
+        assert seg_at(m, 101, side, 109)["status"] == ALLOWED
 
 
-def rules_at(m, way_id, side, pos):
-    return {r["rule"] for r in status_at(m, way_id, side, pos)["reasons"]}
+# ----------------------------------------------- 52.IV.7 bus stops (side)
+def test_bus_stop_15m_only_on_its_side():
+    m = model()
+    assert "BUS_STOP" in rules_at(m, 101, "right", 60)
+    assert "BUS_STOP" in rules_at(m, 101, "right", 74)
+    assert seg_at(m, 101, "right", 77)["status"] == ALLOWED
+    assert seg_at(m, 101, "left", 60)["status"] == ALLOWED
 
 
-@pytest.fixture
-def model():
-    return CityModel(build_raw(), [survey()])
+def test_bus_platform_measured_from_its_ends():
+    r = main_street()
+    r["elements"] += [node(60, 30, -8), node(61, 70, -8),
+                      way(600, [60, 61], public_transport="platform", bus="yes", name="Long platform")]
+    m = CityModel(r, [survey()])
+    assert "BUS_STOP" in rules_at(m, 101, "right", 16)   # 30 - 15 + 1
+    assert "BUS_STOP" in rules_at(m, 101, "right", 84)   # 70 + 15 - 1
 
 
-def test_no_prohibition_without_survey_is_unknown_not_green():
-    m = CityModel(build_raw(), [])
-    assert status_at(m, 101, "right", 20)["status"] == UNKNOWN
+def test_rail_platform_is_not_a_bus_stop():
+    r = main_street()
+    r["elements"].append(node(50, 160, 10, public_transport="platform", railway="platform", name="Rail"))
+    m = CityModel(r, [survey()])
+    assert not any(b["name"] == "Rail" for b in m.bus_stops)
 
 
-def test_clear_curb_inside_survey_is_verified(model):
-    assert status_at(model, 101, "right", 20)["status"] == VERIFIED
+# ------------------------------------------------- 52.IV.6 intersections
+def test_intersection_uses_crossed_road_edge_plus_5m():
+    m = model()
+    # tertiary oneway width 6 -> half 3 + 5 = 8 => [192, 208]
+    assert "INTERSECTION" in rules_at(m, 101, "right", 193)
+    assert seg_at(m, 101, "right", 190)["status"] == ALLOWED
 
 
-def test_crossing_applies_5m_before_in_travel_direction(model):
-    # right side travels east: zone [93, 102]
-    assert "PEDESTRIAN_CROSSING" in rules_at(model, 101, "right", 94)
-    assert status_at(model, 101, "right", 104)["status"] == VERIFIED
-    # left side travels west: zone [98, 107]
-    assert "PEDESTRIAN_CROSSING" in rules_at(model, 101, "left", 106)
-    assert status_at(model, 101, "left", 94)["status"] == VERIFIED
+def test_t_junction_opposite_side_is_caution_not_red():
+    # through road H-J-K east, branch J -> L northwards (left side of the through road)
+    r = raw([node(11, 0, 0), node(12, 100, 0), node(13, 200, 0), node(14, 100, 100),
+             way(201, [11, 12, 13], highway="residential", name="Through"),
+             way(202, [12, 14], highway="residential", name="Branch")])
+    m = CityModel(r, [survey()])
+    assert "INTERSECTION" in rules_at(m, 201, "left", 100)                       # branch side: red
+    opposite = seg_at(m, 201, "right", 100)
+    assert opposite["status"] == UNVERIFIED                                      # exception possible
+    assert "T_JUNCTION_EXCEPTION" in {c["rule"] for c in opposite["cautions"]}
 
 
-def test_bus_stop_only_on_its_side(model):
-    assert "BUS_STOP" in rules_at(model, 101, "right", 60)
-    assert status_at(model, 101, "left", 60)["status"] == VERIFIED
-    assert status_at(model, 101, "right", 80)["status"] == VERIFIED  # 15 m radius ends at 75
+def test_driveway_mouth_blocked_only_on_its_side():
+    r = main_street()
+    r["elements"] += [node(71, 150, 0), node(72, 150, 40), way(701, [71, 72], highway="service")]
+    for e in r["elements"]:
+        if e.get("id") == 101:
+            e["nodes"] = [1, 2, 71, 3, 4]       # driveway attaches to the street at x=150
+    m = CityModel(r, [survey()])
+    assert "DRIVEWAY_BLOCKING" in rules_at(m, 101, "left", 150)   # driveway goes north = left side
+    assert seg_at(m, 101, "right", 150)["status"] == ALLOWED
+    assert 71 not in m.intersections                               # not an intersection (Art. 64.VI)
 
 
-def test_intersection_buffer_uses_crossed_road_width(model):
-    # tertiary oneway width 6 -> half 3 + 5 = 8
-    assert "INTERSECTION" in rules_at(model, 101, "right", 193)
-    assert status_at(model, 101, "right", 190)["status"] == VERIFIED
+# ------------------------------------------------ 52.IV.2 bridges/tunnels
+def test_bridge_without_lane_count_is_caution():
+    seg = seg_at(model(), 103, "right", 50)
+    assert seg["status"] == UNVERIFIED and "BRIDGE_LANES_UNKNOWN" in {c["rule"] for c in seg["cautions"]}
 
 
-def test_bridge_whole_way(model):
-    assert status_at(model, 103, "left", 50)["status"] == PROHIBITED
-    assert "BRIDGE_TUNNEL" in rules_at(model, 103, "right", 10)
+def test_bridge_fewer_than_3_lanes_is_red_3_or_more_is_not():
+    for lanes, expected in (("2", PROHIBITED), ("6", ALLOWED)):
+        r = main_street()
+        for e in r["elements"]:
+            if e.get("id") == 103:
+                e["tags"]["lanes"] = lanes
+        m = CityModel(r, [survey()])
+        assert seg_at(m, 103, "right", 50)["status"] == expected, lanes
 
 
-def test_oneway_left_side_allowed_with_note(model):
-    seg = status_at(model, 102, "left", 30)
-    assert seg["status"] == VERIFIED
-    assert any(n["rule"] == "ONE_WAY_LEFT_SIDE" for n in seg["notes"])
-    assert seg["travel"] == "fwd"
+def test_tunnel_is_red():
+    r = main_street()
+    for e in r["elements"]:
+        if e.get("id") == 103:
+            e["tags"] = {"highway": "residential", "tunnel": "yes"}
+    assert "TUNNEL" in rules_at(CityModel(r, [survey()]), 103, "left", 50)
 
 
-def _sign(kind, fid=2):
-    lon, lat = ll(20, -5)
-    return {"id": fid, "kind": kind, "status": "verified", "source": "test", "verified_at": "2026-11-12",
-            "geometry": {"type": "Point", "coordinates": [lon, lat]}, "props": {}}
-
-
-def test_327_and_328_differ():
-    m27 = CityModel(build_raw(), [survey(), _sign("sign_3_27")])
-    m28 = CityModel(build_raw(), [survey(), _sign("sign_3_28")])
-    s27, s28 = status_at(m27, 101, "right", 40), status_at(m28, 101, "right", 40)
+# ------------------------------------------- signs: 3.27 vs 3.28 (dayanma vs durma)
+def test_327_red_and_328_not_red():
+    m27 = model([obs("sign_3_27", point(20, -5))])
+    m28 = model([obs("sign_3_28", point(20, -5))])
+    s27, s28 = seg_at(m27, 101, "right", 40), seg_at(m28, 101, "right", 40)
     assert s27["status"] == PROHIBITED and "SIGN_3_27" in {r["rule"] for r in s27["reasons"]}
-    assert s28["status"] == VERIFIED and any(n["rule"] == "SIGN_3_28" for n in s28["notes"])
-    # 3.27 zone runs to the next intersection (C at 200 m) on its side only
-    assert "SIGN_3_27" in rules_at(m27, 101, "right", 150)
-    assert status_at(m27, 101, "left", 40)["status"] == VERIFIED
-    assert status_at(m27, 101, "right", 10)["status"] == VERIFIED  # before the sign
+    assert s28["status"] == ALLOWED and "SIGN_3_28" in {n["rule"] for n in s28["notes"]}
+    assert any(n["applies_to"] == "durma" for n in s28["notes"])
 
 
-def test_pending_feature_is_ignored():
-    f = _sign("sign_3_27")
-    f["status"] = "pending"
-    m = CityModel(build_raw(), [survey(), f])
-    assert status_at(m, 101, "right", 40)["status"] == VERIFIED
+def test_327_zone_side_and_direction_specific():
+    m = model([obs("sign_3_27", point(20, -5))])          # south curb = right, traffic eastbound
+    assert "SIGN_3_27" in rules_at(m, 101, "right", 150)   # continues to next intersection (C at 200)
+    assert seg_at(m, 101, "right", 10)["status"] == ALLOWED  # before the sign
+    assert seg_at(m, 101, "left", 40)["status"] == ALLOWED   # other side untouched (64.IX)
 
 
-def test_recommendation_prefers_same_side_and_is_reachable(model):
-    rec = Recommender(model)
-    dest = list(ll(30, -25))
-    origin = list(ll(280, 5))
-    out = rec.recommend(dest, origin)
-    assert out["results"], out
-    top = out["results"][0]
-    assert top["status"] == VERIFIED
-    assert top["side"] == "right"  # destination is south = right side, no street crossing
-    assert top["drive_route"] and top["walk_route"]
-    assert len(out["results"]) <= 3
-    for r in out["results"]:
-        assert model.segments[r["segment_id"]]["status"] == VERIFIED
+def test_327_on_left_curb_runs_westward():
+    m = model([obs("sign_3_27", point(150, 5))])            # north curb = left, traffic westbound
+    assert "SIGN_3_27" in rules_at(m, 101, "left", 120)
+    assert seg_at(m, 101, "left", 170)["status"] == ALLOWED  # 'behind' the sign for westbound traffic
 
 
-def test_no_spot_reported():
-    m = CityModel(build_raw(), [])  # nothing verified
-    out = Recommender(m).recommend(list(ll(30, -25)), None)
-    assert out["results"] == [] and out["message"] == "no_verified_spot"
+def test_327_explicit_zone_length_plate():
+    m = model([obs("sign_3_27", point(20, -5), zone_mode="length", zone_length_m=30)])
+    assert "SIGN_3_27" in rules_at(m, 101, "right", 45)      # zone [20, 50]
+    assert seg_at(m, 101, "right", 85)["status"] == ALLOWED  # (45–75 is the synthetic bus stop)
 
 
-def test_driver_nearest_respects_oneway(model):
-    rec = Recommender(model)
-    out = rec.nearest_stops(list(ll(200, -60)))  # on oneway northbound
-    assert out["results"]
-    for r in out["results"]:
-        assert model.segments[r["segment_id"]]["status"] == VERIFIED
+# ------------------------------------------- markings: 1.4 vs 1.10
+def test_1_4_alone_is_yellow_not_red():
+    m = model([obs("marking_1_4", line((20, -5), (60, -5)))])
+    seg = seg_at(m, 101, "right", 40)
+    assert seg["status"] == UNVERIFIED and "MARKING_1_4_UNPAIRED" in {c["rule"] for c in seg["cautions"]}
+
+
+def test_1_4_with_327_is_red_and_zone_is_line_length():
+    m = model([obs("sign_3_27", point(20, -5)), obs("marking_1_4", line((20, -5), (60, -5)))])
+    assert {"MARKING_1_4", "SIGN_3_27"} <= rules_at(m, 101, "right", 40)
+    # 64.VIII.3: with a paired line the zone is the line's length, not "to the next intersection"
+    assert seg_at(m, 101, "right", 80)["status"] == ALLOWED
+
+
+def test_1_10_never_prohibits_stopping():
+    for feats in ([obs("marking_1_10", line((20, -5), (60, -5)))],
+                  [obs("sign_3_28", point(20, -5)), obs("marking_1_10", line((20, -5), (60, -5)))]):
+        assert seg_at(model(feats), 101, "right", 40)["status"] == ALLOWED
+
+
+# ------------------------------------------- bus lanes (48.IV), bike lanes, taxi stands
+def test_osm_bus_lane_unknown_line_is_caution():
+    m = model(**{"lanes:bus:forward": "1"})
+    seg = seg_at(m, 101, "right", 30)
+    assert seg["status"] == UNVERIFIED and "BUS_LANE_UNKNOWN_LINE" in {c["rule"] for c in seg["cautions"]}
+    assert seg_at(m, 101, "left", 30)["status"] == ALLOWED
+
+
+def test_bus_lane_dashed_allows_dropoff_solid_prohibits():
+    tags = {"lanes:bus:forward": "1"}
+    dashed = model([obs("bus_lane", line((0, -5), (90, -5)), line_type="dashed")], **tags)
+    solid = model([obs("bus_lane", line((0, -5), (90, -5)), line_type="solid")], **tags)
+    assert seg_at(dashed, 101, "right", 30)["status"] == ALLOWED
+    assert seg_at(solid, 101, "right", 30)["status"] == PROHIBITED
+
+
+def test_bike_lane_is_red():
+    assert "BIKE_LANE" in rules_at(model(**{"cycleway:right": "lane"}), 101, "right", 30)
+
+
+def test_taxi_stand_depends_on_vehicle():
+    m = model([obs("taxi_stand", line((10, -5), (40, -5)))])
+    seg = seg_at(m, 101, "right", 25)
+    assert seg["status_by_vehicle"] == {"taxi": ALLOWED, "private": PROHIBITED}
+
+
+# ------------------------------------------- caution-only rules, unverified data, conflicts
+def test_traffic_signal_distance_is_caution():
+    r = main_street()
+    for e in r["elements"]:
+        if e.get("id") == 4:
+            e["tags"] = {"highway": "traffic_signals"}
+    m = CityModel(r, [survey()])
+    seg = seg_at(m, 101, "right", 295)
+    assert seg["status"] == UNVERIFIED and "TRAFFIC_SIGNAL" in {c["rule"] for c in seg["cautions"]}
+
+
+def test_pending_observation_turns_curb_yellow_not_red():
+    m = model([obs("sign_3_27", point(20, -5), status="pending")])
+    seg = seg_at(m, 101, "right", 40)
+    assert seg["status"] == UNVERIFIED and "PENDING_OBSERVATION" in {c["rule"] for c in seg["cautions"]}
+
+
+def test_rejected_observation_has_no_effect():
+    m = model([obs("sign_3_27", point(20, -5), status="rejected")])
+    assert seg_at(m, 101, "right", 40)["status"] == ALLOWED
+
+
+def test_official_zone_on_prohibited_curb_is_flagged_but_stays_red():
+    m = CityModel(main_street(), [obs("official_zone", line((95, -5), (105, -5)))])
+    seg = seg_at(m, 101, "right", 100)   # on the zebra crossing (52.IV.4)
+    assert seg["status"] == PROHIBITED and "SOURCE_CONFLICT" in {c["rule"] for c in seg["cautions"]}
+
+
+def test_conflicting_pending_report_on_green_curb_is_yellow():
+    m = model([obs("sign_3_27", point(20, -5), status="pending")])
+    assert seg_at(m, 101, "right", 30)["status"] == UNVERIFIED
+
+
+def test_every_reason_carries_its_legal_basis():
+    m = model([obs("sign_3_27", point(20, -5))])
+    for seg in m.segments.values():
+        for r in seg["reasons"] + seg["cautions"]:
+            assert r["verification"] in ("verified_text", "interpretation", "heuristic")
+            if r["effect"] == "prohibit":
+                assert r["legal_ref"].startswith("Yol hərəkəti haqqında Qanun (517-IQ), m.")
+
+
+def test_bad_feature_does_not_break_build():
+    bad = obs("survey_area", {"type": "Polygon", "coordinates": []})
+    m = CityModel(main_street(), [survey(), bad])
+    assert bad["id"] in m.feature_errors and m.segments
+
+
+def test_oneway_left_side_allowed_with_note():
+    seg = seg_at(model(), 102, "left", 30)
+    assert seg["status"] == ALLOWED and any(n["rule"] == "ONE_WAY_LEFT_SIDE" for n in seg["notes"])
+
+
+def test_synthetic_sources_are_labelled():
+    m = model([obs("sign_3_27", point(20, -5))])
+    assert "synthetic_test" in seg_at(m, 101, "right", 40)["sources"]
+

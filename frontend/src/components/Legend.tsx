@@ -5,12 +5,12 @@ import { STATUS_COLORS } from "./MapView";
 export default function Legend({ meta, lang, theme, showRoutes }: { meta: Meta | null; lang: Lang; theme: "dark" | "light"; showRoutes: boolean }) {
   const t = makeT(lang);
   const c = STATUS_COLORS[theme];
-  const km = (s: "PROHIBITED" | "VERIFIED" | "UNKNOWN") => meta ? (meta.stats.by_status[s].length_m / 1000).toFixed(1) + " km" : "";
+  const km = (s: "PROHIBITED" | "ALLOWED" | "UNVERIFIED") => meta ? (meta.stats.by_status[s].length_m / 1000).toFixed(1) + " km" : "";
   return (
     <div className="legend glass">
       <h5>{t("legend")}</h5>
-      {(["VERIFIED", "PROHIBITED", "UNKNOWN"] as const).map((s) => (
-        <div className="lg-row" key={s}>
+      {(["ALLOWED", "PROHIBITED", "UNVERIFIED"] as const).map((s) => (
+        <div className="lg-row" key={s} title={t("st_" + s + "_long")}>
           <span className="lg-swatch" style={{ background: c[s] }} />
           <span>{t("st_" + s)}</span>
           <span className="km">{km(s)}</span>

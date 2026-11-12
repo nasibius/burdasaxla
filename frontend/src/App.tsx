@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { STATIC_MODE, api } from "./api";
 import AdminPanel, { TOOL_GEOM } from "./components/AdminPanel";
-import { ILayers, IMap, IMoon, IShield, ISun, IX, Logo } from "./components/Icons";
+import { IInfo, ILayers, IMap, IMoon, IShield, ISun, IX, Logo } from "./components/Icons";
 import Legend from "./components/Legend";
-import MapView from "./components/MapView";
+import MapView, { type MapResult } from "./components/MapView";
 import Panel from "./components/Panel";
+import RulesPanel from "./components/RulesPanel";
 import SegmentDrawer from "./components/SegmentDrawer";
 import { makeT, type Lang } from "./i18n";
-import type { Context, CuratedFeature, FeatureKind, LngLat, Meta, Mode, RecResponse, SearchItem, Segment, SegFeature } from "./types";
+import type {
+  Context, CuratedFeature, FeatureKind, LngLat, Meta, Mode, RecResponse, RuleCatalog, RuleInfo, SearchItem, Segment, SegFeature, VehicleClass,
+} from "./types";
 
 const store = {
   get: (k: string, d: string) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -39,7 +42,10 @@ export default function App() {
   const [resp, setResp] = useState<RecResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [selectedRank, setSelectedRank] = useState<number | null>(null);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [vehicle, setVehicle] = useState<VehicleClass>(() => (store.get("bs-vehicle", "taxi") === "private" ? "private" : "taxi"));
+  const [catalog, setCatalog] = useState<RuleCatalog | null>(null);
+  const [rulesOpen, setRulesOpen] = useState(false);
   const [segDetail, setSegDetail] = useState<Segment | null>(null);
   const [layers, setLayers] = useState({ segments: true, stops: true, crossings: true, features: true });
   const [layersOpen, setLayersOpen] = useState(false);
@@ -51,10 +57,15 @@ export default function App() {
   const [tool, setTool] = useState<FeatureKind | null>(null);
   const [draft, setDraft] = useState<LngLat[]>([]);
   const [draftDone, setDraftDone] = useState(false);
+  const pointRequest = useRef<((c: LngLat) => void) | null>(null);
+  const [cameraMarks, setCameraMarks] = useState<{ camera: LngLat; target: LngLat; heading?: number | null }[]>([]);
+  const [highlight, setHighlight] = useState<number | null>(null);
 
   useEffect(() => { document.documentElement.dataset.theme = theme; store.set("bs-theme", theme); }, [theme]);
   useEffect(() => { document.documentElement.lang = lang; store.set("bs-lang", lang); }, [lang]);
   useEffect(() => { store.set("bs-admin", token); }, [token]);
+  useEffect(() => { store.set("bs-vehicle", vehicle); }, [vehicle]);
+  useEffect(() => { api.rules().then(setCatalog).catch(() => setCatalog(null)); }, []);
   useEffect(() => {
     const onHash = () => setView(location.hash === "#admin" ? "admin" : "map");
     window.addEventListener("hashchange", onHash);
@@ -63,10 +74,10 @@ export default function App() {
 
   // data loading
   useEffect(() => {
-    Promise.all([api.meta(), api.segments(), api.context()])
+    Promise.all([api.meta(vehicle), api.segments(vehicle), api.context()])
       .then(([m, s, c]) => { setMeta(m); setSegments(s.features); setContext(c); setLoadErr(null); })
       .catch((e) => setLoadErr(e.message));
-  }, [version]);
+  }, [version, vehicle]);
   useEffect(() => {
     const p = view === "admin" && token && !STATIC_MODE
       ? api.admin.list(token).then((l) => l.filter((f) => f.status !== "rejected")).catch(() => api.features())
@@ -83,29 +94,30 @@ export default function App() {
     const id = ++reqId.current;
     setLoading(true); setError(null);
     const h = window.setTimeout(() => {
-      const call = mode === "driver" ? api.driverNearest(origin!) : api.recommend(destination!, origin, mode, maxWalk);
+      const call = mode === "driver" ? api.driverNearest(origin!, vehicle) : api.recommend(destination!, origin, mode, maxWalk, vehicle);
       call.then((r) => {
         if (id !== reqId.current) return;
         setResp(r);
-        setSelectedRank(r.results[0]?.rank ?? null);
-        const pts: LngLat[] = [...r.results.map((x) => x.point)];
+        setSelectedKey(r.results[0] ? "c" + r.results[0].rank : r.unverified_candidates?.[0] ? "u" + r.unverified_candidates[0].rank : null);
+        const pts: LngLat[] = [...r.results.map((x) => x.point), ...(r.unverified_candidates ?? []).map((x) => x.point)];
         if (destination && mode !== "driver") pts.push(destination);
         if (origin && (mode === "driver" || r.results.some((x) => x.drive_route))) pts.push(origin);
-        setFit((f) => ({ pts, token: f.token + 1, maxZoom: r.results.length ? 18 : 16 }));
+        setFit((f) => ({ pts, token: f.token + 1, maxZoom: pts.length > 1 ? 18 : 16 }));
         if (mode !== "driver" && destLabel.startsWith("📍") && r.curb_at_door?.name) setDestLabel("📍 " + r.curb_at_door.name);
       }).catch((e) => id === reqId.current && setError(e.message === "network" ? t("err_network") : e.message))
         .finally(() => id === reqId.current && setLoading(false));
     }, 120);
     return () => window.clearTimeout(h);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, destination, origin, maxWalk, version, view]);
+  }, [mode, destination, origin, maxWalk, version, view, vehicle]);
 
   const openSegment = useCallback((id: string, _at?: LngLat) => {
-    api.segment(id).then(setSegDetail).catch((e) => setError(e.message));
+    api.segment(id).then((sg) => { setSegDetail(sg); setRulesOpen(false); }).catch((e) => setError(e.message));
   }, []);
 
   const onMapClick = useCallback((c: LngLat) => {
     if (view === "admin") {
+      if (pointRequest.current) { pointRequest.current(c); pointRequest.current = null; return; }
       if (!tool || draftDone) return;
       const next = [...draft, c];
       setDraft(next);
@@ -144,7 +156,12 @@ export default function App() {
 
   const cancelDraft = () => { setDraft([]); setDraftDone(false); setTool(null); };
   const center = useMemo<LngLat>(() => meta?.center ?? [49.8497, 40.3797], [meta]);
-  const results = view === "map" ? resp?.results ?? [] : [];
+  const results: MapResult[] = view === "map"
+    ? [...(resp?.results ?? []).map((r) => ({ ...r, key: "c" + r.rank })),
+       ...(resp?.unverified_candidates ?? []).map((r) => ({ ...r, key: "u" + r.rank, unverified: true }))]
+    : [];
+  const rulesById = useMemo<Record<string, RuleInfo>>(
+    () => Object.fromEntries((catalog?.rules ?? []).map((r) => [r.id, r])), [catalog]);
 
   if (!meta && loadErr) {
     return (
@@ -161,14 +178,15 @@ export default function App() {
       <MapView
         center={center} theme={theme} lang={lang} segments={segments} context={context} features={features} layers={layers}
         destination={view === "map" && mode !== "driver" ? destination : null} origin={view === "map" ? origin : null}
-        results={results} selectedRank={selectedRank} selectedSegment={segDetail?.id ?? null}
+        results={results} selectedKey={selectedKey} selectedSegment={segDetail?.id ?? null}
+        cameraMarks={view === "admin" ? cameraMarks : []} highlightFeature={view === "admin" ? highlight : null}
         picking={!!picking || (view === "admin" && !!tool && !draftDone)}
         fitPoints={fit.pts} fitToken={fit.token} fitMaxZoom={fit.maxZoom}
         draft={view === "admin" && tool ? { kind: tool, coords: draft } : null}
-        onMapClick={onMapClick} onSelectRank={setSelectedRank}
+        onMapClick={onMapClick} onSelectKey={setSelectedKey}
         onSelectSegment={(id, at) => {
           // While placing a point (destination/driver/admin drawing), a click on a curb is a placement, not "open details".
-          if (picking || (view === "admin" && tool && !draftDone)) onMapClick(at);
+          if (picking || (view === "admin" && ((tool && !draftDone) || pointRequest.current))) onMapClick(at);
           else openSegment(id);
         }}
         onMoveDestination={(c) => { setDestination(c); setDestLabel(`📍 ${c[1].toFixed(5)}, ${c[0].toFixed(5)}`); }}
@@ -183,8 +201,8 @@ export default function App() {
           origin={origin} originLabel={originLabel ?? t("demo_origin")} picking={picking} setPicking={setPicking}
           onPickSearch={onPickSearch} onClearDestination={() => { setDestination(null); setDestLabel(""); setResp(null); }}
           onMyLocation={onMyLocation} maxWalk={maxWalk} setMaxWalk={setMaxWalk}
-          resp={resp} loading={loading} error={error} selectedRank={selectedRank} onSelectRank={setSelectedRank}
-          onOpenSegment={openSegment}
+          resp={resp} loading={loading} error={error} selectedKey={selectedKey} onSelect={setSelectedKey}
+          onOpenSegment={openSegment} vehicle={vehicle} setVehicle={setVehicle}
         />
       ) : (
         <AdminPanel
@@ -192,6 +210,9 @@ export default function App() {
           setTool={(k) => { setTool(k); setDraft([]); setDraftDone(false); }}
           draft={draft} draftDone={draftDone} onFinishPolygon={() => setDraftDone(true)} onCancelDraft={cancelDraft}
           onChanged={() => setVersion((v) => v + 1)} version={version}
+          requestPoint={(cb) => { pointRequest.current = cb; }}
+          setCameraMarks={setCameraMarks} setHighlight={setHighlight}
+          focusMap={(pts) => setFit((f) => ({ pts, token: f.token + 1, maxZoom: 19 }))}
         />
       )}
 
@@ -199,6 +220,9 @@ export default function App() {
         <div className="mob-brand glass"><Logo size={28} /><span>Burda<b>Saxla</b></span></div>
         <button className={`tb-btn ${layersOpen ? "active" : ""}`} onClick={() => setLayersOpen((o) => !o)} aria-label={t("layers")}>
           <ILayers size={17} /><span className="lbl">{t("layers")}</span>
+        </button>
+        <button className={`tb-btn ${rulesOpen ? "active" : ""}`} onClick={() => { setRulesOpen((o) => !o); setSegDetail(null); }} aria-label={t("rules_btn")}>
+          <IInfo size={17} /><span className="lbl">{t("rules_btn")}</span>
         </button>
         <button className="tb-btn" onClick={() => setLang(lang === "az" ? "en" : "az")} aria-label="language">{lang === "az" ? "EN" : "AZ"}</button>
         <button className="tb-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="theme">
@@ -226,8 +250,9 @@ export default function App() {
         </div>
       )}
 
-      {!segDetail && <Legend meta={meta} lang={lang} theme={theme} showRoutes={results.length > 0} />}
-      {segDetail && <SegmentDrawer seg={segDetail} lang={lang} onClose={() => setSegDetail(null)} />}
+      {!segDetail && !rulesOpen && <Legend meta={meta} lang={lang} theme={theme} showRoutes={results.length > 0} />}
+      {segDetail && <SegmentDrawer seg={segDetail} lang={lang} onClose={() => setSegDetail(null)} rules={rulesById} law={catalog?.law} vehicle={vehicle} />}
+      {rulesOpen && !segDetail && catalog && <RulesPanel catalog={catalog} lang={lang} onClose={() => setRulesOpen(false)} />}
     </div>
   );
 }

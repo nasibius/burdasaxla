@@ -11,14 +11,17 @@ export interface EngineData {
   nodes: LngLat[];
   ways: { id: number; n: number[]; w: number; o: 0 | 1; sp: number; nm: string; c: 0 | 1 }[];
   walk: [number, number][];
-  segments: [string, number, "r" | "l", number, number, "P" | "V" | "U", 0 | 1, string[], string, string[]][];
+  /** [id, wayIdx, side, start, end, status codes "<taxi><private>" (P/A/U), official, notes, confidence, prohibitions, cautions] */
+  segments: [string, number, "r" | "l", number, number, string, 0 | 1, string[], string, string[], string[]][];
   crossings: number[];
   intersections: number[];
 }
 
 type XY = [number, number];
 type Side = "right" | "left";
-const STATUS = { P: "PROHIBITED", V: "VERIFIED", U: "UNKNOWN" } as const;
+const STATUS = { P: "PROHIBITED", A: "ALLOWED", U: "UNVERIFIED" } as const;
+type Code = keyof typeof STATUS;
+export type VehicleClass = "taxi" | "private";
 
 const MIN_STOP_LENGTH_M = 7;
 const WALK_SPEED = 1.3;
@@ -170,8 +173,8 @@ class Way {
 }
 
 interface Seg {
-  id: string; way: Way; side: Side; start: number; end: number; status: keyof typeof STATUS;
-  official: boolean; notes: string[]; confidence: string; rules: string[];
+  id: string; way: Way; side: Side; start: number; end: number; status: Record<VehicleClass, Code>;
+  official: boolean; notes: string[]; confidence: string; rules: string[]; cautions: string[];
 }
 
 // -------------------------------------------------------------------- engine
@@ -210,9 +213,9 @@ export class StaticEngine {
       this.addEdge(this.walkAdj, a, b, L); this.addEdge(this.walkAdj, b, a, L);
       return { a: this.xy[a], b: this.xy[b], data: { a, b } };
     }));
-    this.segs = data.segments.map(([id, wi, s, start, end, st, off, notes, conf, rules]) => ({
-      id, way: this.ways[wi], side: s === "r" ? "right" : "left", start, end, status: st, official: !!off,
-      notes, confidence: conf, rules,
+    this.segs = data.segments.map(([id, wi, s, start, end, st, off, notes, conf, rules, cautions]) => ({
+      id, way: this.ways[wi], side: s === "r" ? "right" : "left", start, end,
+      status: { taxi: st[0] as Code, private: st[1] as Code }, official: !!off, notes, confidence: conf, rules, cautions,
     }));
     for (const s of this.segs) {
       const k = `${s.way.i}:${s.side}`;
@@ -250,10 +253,10 @@ export class StaticEngine {
     return { sources: new Map([[a, hit.d + hit.t], [b, hit.d + (L - hit.t)]]), snapped: hit.q };
   }
 
-  private candidates(center: XY, radius: number, prefer: "nearest" | "first") {
+  private candidates(center: XY, radius: number, prefer: "nearest" | "first", vehicle: VehicleClass, status: Code) {
     const out: { seg: Seg; way: Way; pos: number; pt: XY }[] = [];
     for (const seg of this.segs) {
-      if (seg.status !== "V" || seg.end - seg.start < MIN_STOP_LENGTH_M) continue;
+      if (seg.status[vehicle] !== status || seg.end - seg.start < MIN_STOP_LENGTH_M) continue;
       const w = seg.way, a = seg.start + 3.5, b = seg.end - 3.5;
       const pos = prefer === "nearest" ? Math.min(Math.max(w.project(center).pos, a), b)
         : w.travel(seg.side) === "fwd" ? a : b;
@@ -316,23 +319,28 @@ export class StaticEngine {
     return chosen;
   }
 
-  curbAtDoor(destLL: LngLat): DoorInfo | null {
+  private evidence(seg: Seg, vehicle: VehicleClass) {
+    const status = STATUS[seg.status[vehicle]];
+    return {
+      status, legally_confirmed: status === "ALLOWED",
+      reasons: seg.rules.map((rule) => ({ rule })), cautions: seg.cautions.map((rule) => ({ rule })),
+      notes: seg.notes, sources: ["osm"], confidence: seg.confidence,
+    };
+  }
+
+  curbAtDoor(destLL: LngLat, vehicle: VehicleClass = "taxi"): DoorInfo | null {
     const dest = this.toXY(destLL), near = this.nearestCurbWay(dest, 60);
     if (!near) return null;
     const w = near.way, side = w.sideOf(dest), pos = w.project(dest).pos;
     const seg = (this.segsByWaySide.get(`${w.i}:${side}`) ?? []).find((s) => s.start <= pos && pos <= s.end);
     if (!seg) return null;
-    return {
-      segment_id: seg.id, status: STATUS[seg.status], name: w.name, side, distance_m: Math.round(near.d),
-      reasons: seg.rules.map((rule) => ({ rule, legal_ref: "", source_ref: "", detail: {} })),
-    };
+    return { segment_id: seg.id, name: w.name, side, distance_m: Math.round(near.d), ...this.evidence(seg, vehicle) } as DoorInfo;
   }
 
-  recommend(destLL: LngLat, originLL: LngLat | null, maxWalk = 450): RecResponse {
+  recommend(destLL: LngLat, originLL: LngLat | null, maxWalk = 450, vehicle: VehicleClass = "taxi"): RecResponse {
     const dest = this.toXY(destLL), origin = originLL ? this.toXY(originLL) : null;
-    const cands = this.candidates(dest, maxWalk, "nearest");
     const ws = this.snapWalk(dest);
-    if (!ws) return { results: [], message: "destination_outside_network", curb_at_door: this.curbAtDoor(destLL) };
+    if (!ws) return { results: [], unverified_candidates: [], message: "destination_outside_network", curb_at_door: this.curbAtDoor(destLL, vehicle) };
     const { d: wd, prev: wprev } = dijkstra(this.walkAdj, ws.sources, maxWalk * 1.6);
     const warnings: string[] = [];
     let ds: ReturnType<StaticEngine["snapDrive"]> = null, dd: Map<number, number> | null = null, dprev = new Map<number, number>();
@@ -342,62 +350,82 @@ export class StaticEngine {
       else warnings.push("origin_outside_network");
     }
     let unreachable = 0;
-    const scored = [];
-    for (const c of cands) {
-      const walk = this.walkTo(c, wd);
-      if (!walk || walk.m > maxWalk * 1.25) continue;
-      let arr = null;
-      if (dd) { arr = this.arrival(c, dd, ds); if (!arr) { unreachable++; continue; } }
-      const cross = this.crossingCheck(c, dest);
-      let score = walk.m + ((cross as any).penalty_m ?? 0);
-      if (arr) score += arr.seconds * 1.2;
-      if (c.seg.official) score -= OFFICIAL_BONUS_M;
-      scored.push({ ...c, walk, arr, cross, score });
-    }
-    scored.sort((a, b) => a.score - b.score);
-    const results: Recommendation[] = this.diverse(scored).map((c, k) => {
-      const nodes = pathTo(wprev, c.walk.node).reverse();
-      const walkCoords: XY[] = [c.pt, c.way.at(c.pos), ...nodes.map((n) => this.xy[n]), ws.snapped, dest];
-      const { penalty_m: _p, ...crossing } = c.cross as any;
-      const item: Recommendation = {
-        rank: k + 1, point: this.toLL(c.pt), segment_id: c.seg.id, street: c.way.name, side: c.seg.side,
-        compass: c.way.compass(c.pos, c.seg.side), status: "VERIFIED", official: c.seg.official,
-        confidence: c.seg.confidence, walk_m: Math.round(c.walk.m), walk_min: +(c.walk.m / WALK_SPEED / 60).toFixed(1),
-        walk_route: walkCoords.map((p) => this.toLL(p)), crossing, notes: c.seg.notes, score: +c.score.toFixed(1),
-      };
-      if (c.arr && ds) {
-        const dp = this.drivePath(c, c.arr, dprev, ds, origin!);
-        Object.assign(item, { drive_route: dp.coords, drive_m: Math.round(dp.metres), drive_min: +(c.arr.seconds / 60).toFixed(1) });
+    const score = (cands: ReturnType<StaticEngine["candidates"]>) => {
+      const scored = [];
+      for (const c of cands) {
+        const walk = this.walkTo(c, wd);
+        if (!walk || walk.m > maxWalk * 1.25) continue;
+        let arr = null;
+        if (dd) { arr = this.arrival(c, dd, ds); if (!arr) { unreachable++; continue; } }
+        const cross = this.crossingCheck(c, dest);
+        let sc = walk.m + ((cross as any).penalty_m ?? 0);
+        if (arr) sc += arr.seconds * 1.2;
+        if (c.seg.official) sc -= OFFICIAL_BONUS_M;
+        sc += 60 * c.seg.cautions.filter((r) => r !== "NOT_SURVEYED").length;
+        scored.push({ ...c, walk, arr, cross, score: sc });
       }
-      return item;
-    });
+      return scored.sort((a, b) => a.score - b.score);
+    };
+    const build = (scored: ReturnType<typeof score>, avoid: { pt: XY }[] = []) => {
+      const chosen = this.diverse(scored.filter((c) => avoid.every((o) => dist(o.pt, c.pt) >= 35)));
+      const items: Recommendation[] = chosen.map((c, k) => {
+        const nodes = pathTo(wprev, c.walk.node).reverse();
+        const walkCoords: XY[] = [c.pt, c.way.at(c.pos), ...nodes.map((n) => this.xy[n]), ws.snapped, dest];
+        const { penalty_m: _p, ...crossing } = c.cross as any;
+        const item = {
+          rank: k + 1, point: this.toLL(c.pt), segment_id: c.seg.id, street: c.way.name, side: c.seg.side,
+          compass: c.way.compass(c.pos, c.seg.side), official: c.seg.official, length_m: +(c.seg.end - c.seg.start).toFixed(2),
+          walk_m: Math.round(c.walk.m), walk_min: +(c.walk.m / WALK_SPEED / 60).toFixed(1),
+          walk_route: walkCoords.map((p) => this.toLL(p)), crossing, score: +c.score.toFixed(1),
+          ...this.evidence(c.seg, vehicle),
+        } as Recommendation;
+        if (c.arr && ds) {
+          const dp = this.drivePath(c, c.arr, dprev, ds, origin!);
+          Object.assign(item, { drive_route: dp.coords, drive_m: Math.round(dp.metres), drive_min: +(c.arr.seconds / 60).toFixed(1) });
+        }
+        return item;
+      });
+      return { items, chosen };
+    };
+    const green = this.candidates(dest, maxWalk, "nearest", vehicle, "A");
+    const yellow = this.candidates(dest, maxWalk, "nearest", vehicle, "U");
+    const g = build(score(green));
+    const y = build(score(yellow), g.chosen);
     return {
-      results, curb_at_door: this.curbAtDoor(destLL), message: results.length ? null : "no_verified_spot", warnings,
-      diagnostics: { candidates_in_radius: cands.length, unreachable_by_car: unreachable, ranked: scored.length, max_walk_m: maxWalk },
+      results: g.items, unverified_candidates: y.items, curb_at_door: this.curbAtDoor(destLL, vehicle),
+      message: g.items.length ? null : "no_verified_spot", warnings,
+      diagnostics: { candidates_in_radius: green.length, unreachable_by_car: unreachable, ranked: g.items.length, max_walk_m: maxWalk },
     };
   }
 
-  nearestStops(originLL: LngLat, radius = 1200): RecResponse {
+  nearestStops(originLL: LngLat, radius = 1200, vehicle: VehicleClass = "taxi"): RecResponse {
     const origin = this.toXY(originLL), ds = this.snapDrive(origin);
-    if (!ds || !ds.sources.size) return { results: [], message: "origin_outside_network" };
+    if (!ds || !ds.sources.size) return { results: [], unverified_candidates: [], message: "origin_outside_network" };
     const { d: dd, prev } = dijkstra(this.driveAdj, ds.sources);
-    const scored = [];
-    for (const c of this.candidates(origin, radius, "first")) {
-      const arr = this.arrival(c, dd, ds);
-      if (!arr) continue;
-      scored.push({ ...c, arr, score: arr.seconds - (c.seg.official ? OFFICIAL_BONUS_M / 8 : 0) });
-    }
-    scored.sort((a, b) => a.score - b.score);
-    const results: Recommendation[] = this.diverse(scored, 3, 50).map((c, k) => {
-      const dp = this.drivePath(c, c.arr, prev, ds, origin);
-      return {
-        rank: k + 1, point: this.toLL(c.pt), segment_id: c.seg.id, street: c.way.name, side: c.seg.side,
-        compass: c.way.compass(c.pos, c.seg.side), status: "VERIFIED", official: c.seg.official, confidence: c.seg.confidence,
-        drive_route: dp.coords, drive_m: Math.round(dp.metres), drive_min: +(c.arr.seconds / 60).toFixed(1),
-        length_m: +(c.seg.end - c.seg.start).toFixed(2), notes: c.seg.notes,
-      };
-    });
-    return { results, message: results.length ? null : "no_verified_spot" };
+    const rank = (status: Code, avoid: { pt: XY }[] = []) => {
+      const scored = [];
+      for (const c of this.candidates(origin, radius, "first", vehicle, status)) {
+        const arr = this.arrival(c, dd, ds);
+        if (!arr || avoid.some((o) => dist(o.pt, c.pt) < 50)) continue;
+        scored.push({ ...c, arr, score: arr.seconds - (c.seg.official ? OFFICIAL_BONUS_M / 8 : 0)
+          + 8 * c.seg.cautions.filter((r) => r !== "NOT_SURVEYED").length });
+      }
+      scored.sort((a, b) => a.score - b.score);
+      const chosen = this.diverse(scored, 3, 50);
+      const items: Recommendation[] = chosen.map((c, k) => {
+        const dp = this.drivePath(c, c.arr, prev, ds, origin);
+        return {
+          rank: k + 1, point: this.toLL(c.pt), segment_id: c.seg.id, street: c.way.name, side: c.seg.side,
+          compass: c.way.compass(c.pos, c.seg.side), official: c.seg.official,
+          drive_route: dp.coords, drive_m: Math.round(dp.metres), drive_min: +(c.arr.seconds / 60).toFixed(1),
+          length_m: +(c.seg.end - c.seg.start).toFixed(2), ...this.evidence(c.seg, vehicle),
+        } as Recommendation;
+      });
+      return { items, chosen };
+    };
+    const g = rank("A");
+    const y = rank("U", g.chosen);
+    return { results: g.items, unverified_candidates: y.items, message: g.items.length ? null : "no_verified_spot" };
   }
 }
 

@@ -12,7 +12,6 @@ METRIC_CRS = "EPSG:32639"
 
 DEFAULT_ADMIN_TOKEN = "burdasaxla-admin"
 ADMIN_TOKEN = os.environ.get("BURDASAXLA_ADMIN_TOKEN", DEFAULT_ADMIN_TOKEN)
-NO_DEMO_SEED = os.environ.get("BURDASAXLA_NO_DEMO_SEED") == "1"
 
 # Roads that get curb segments (both sides modelled).
 CURB_HIGHWAYS = {
@@ -40,3 +39,6 @@ SPEED_KMH = {
 }
 
 MIN_STOP_LENGTH_M = 7.0  # a car needs ~5 m + margins to pull in and out
+
+# Vehicle class used for the default map status ("taxi" | "private"). Only rules with exemptions differ.
+DEFAULT_VEHICLE = os.environ.get("BURDASAXLA_DEFAULT_VEHICLE", "taxi")

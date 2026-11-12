@@ -3,13 +3,16 @@
 A map that applies Azerbaijan's road-traffic stopping rules to **each side of every street** in
 the 28 May area of Baku. It also recommends where a driver can legally drop off or pick up a passenger.
 
-* **Red (PROHIBITED):** a known rule forbids stopping here (crossing, intersection, bus stop, bus lane, bridge, sign 3.27, marking 1.4…).
-* **Green (VERIFIED):** no prohibition, **and** the curb is covered by a verified survey area or an official AYNA zone.
-* **Gray (UNKNOWN):** no known prohibition, but not verified. *No prohibition found never means green on its own.*
+* **Red (PROHIBITED):** a *verified* rule of the Law “On Road Traffic” (517-IQ) forbids **stopping (dayanma, Art. 1.29)**
+  here for the selected vehicle class. A pick-up/drop-off legally *is* stopping.
+* **Green (ALLOWED):** the curb was **checked on site** (a reviewed survey observation, or an official AYNA zone) and
+  no prohibition or open question applies.
+* **Yellow (UNVERIFIED):** incomplete, unverified or conflicting information. **Missing sign data never means
+  stopping is legal.** Until a real field survey is entered, the map has no green curbs at all.
 
-Legal decisions are made by a **deterministic rule engine** (Python + Shapely). No AI is involved.
-
-**Live demo:** https://nasibius.github.io/burdasaxla/ (static build, see [Hosting](#hosting)).
+Legal decisions are made by a **deterministic rule engine** (Python + Shapely). No AI is involved. Every rule cites
+its article, quotes the official text from e-qanun.az and states how certain it is. See
+**[docs/LEGAL_VERIFICATION.md](docs/LEGAL_VERIFICATION.md)**.
 
 ---
 
@@ -21,7 +24,7 @@ Requirements: Python 3.11+ and Node 18+.
 # 1. Backend
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m pytest -q                         # 30 tests
+.venv/bin/python -m pytest -q                         # 66 tests
 .venv/bin/uvicorn app.main:app --port 8000 --reload   # http://localhost:8000/docs
 ```
 
@@ -56,9 +59,8 @@ There are two ways to run it:
 **How the static demo works.** On deploy, the Python rule engine runs in CI (`backend/scripts/export_static.py`).
 It writes every curb status and reason, plus compact road and walk graphs, to JSON. Legal decisions therefore still come
 from Python. In the browser, `frontend/src/static/engine.ts` runs the routing and ranking part of the recommender. It is a
-line-by-line port of `dropoff.py` and is checked against the API on 40 random trips: the top drop-off pick matches
-40/40 and walking distance is within 2 m. Driver mode matches 37/40; the three differences are equal-time ties at
-OSM way splits.
+line-by-line port of `dropoff.py`. It is checked against the API on 80 random queries (40 trips × both vehicle
+classes): the top recommendation, the door status and the driver-mode top pick were identical in 80/80.
 
 **Running the full app with the API:**
 
@@ -76,13 +78,14 @@ are reset whenever the service restarts. Attach a disk at `/data` to keep them.
 | `BURDASAXLA_ADMIN_TOKEN` | `burdasaxla-admin` (logged as a warning) | Admin API token |
 | `BURDASAXLA_DB` | `backend/data/burdasaxla.sqlite3` | SQLite file for curated features |
 | `BURDASAXLA_OSM` | `backend/data/osm_raw.json` | OSM snapshot |
-| `BURDASAXLA_NO_DEMO_SEED` | unset | `1` = don't create the demo survey area |
+| `BURDASAXLA_DEFAULT_VEHICLE` | `taxi` | Vehicle class for the default map status |
+| `MAPILLARY_TOKEN` | unset | Enables the Mapillary importer |
 | `VITE_STATIC`, `VITE_BASE` | unset, `/` | Build the static variant / set its public path |
 
 ## Quality checks
 
-* `backend`: `ruff check app tests scripts` and `pytest -q` (30 tests: rule geometry, recommender, API, security
-  and regression cases). Both run in CI (`.github/workflows/ci.yml`) along with the frontend type-check and build.
+* `backend`: `ruff check app tests scripts` and `pytest -q` (66 tests: verified rules, 3.27 vs 3.28, 1.4 vs 1.10, side/direction, exceptions,
+  conflicts, unverified observations, recommender trust, evidence workflow, importers, security, concurrency). Both run in CI (`.github/workflows/ci.yml`) along with the frontend type-check and build.
 * Inputs are validated. Out-of-range coordinates get a 422. A destination outside the area gets `outside_area`. A driver
   outside the area or off the road network gets a `warnings` entry instead of a silently missing car route.
 * Admin geometry is checked for type, validity and being inside the modelled area *before* it is stored. A bad row that
@@ -123,26 +126,20 @@ interval boundary, which gives the **curb segments**. Every segment stores its i
 of travel, reasons (rule id + version + legal reference + source object), notes, coverage, sources, last-verified
 date and confidence.
 
-### Rules implemented (`app/rules.py`)
+### Rules implemented
 
-| Rule | Effect | Geometry |
-|---|---|---|
-| Pedestrian crossing | prohibit | on the crossing + **5 m before it in the direction of travel** (so the two sides differ) |
-| Intersection | prohibit | ± (half-width of the crossed road + 5 m); yard/driveway exits are excluded (adjacent territory) |
-| Bus stop | prohibit | ±15 m around the stop sign/platform, **only on the stop's side** (rail/metro platforms excluded) |
-| Bus lane | prohibit | OSM `lanes:bus`, `bus:lanes`, `psv:lanes`, `busway:*`, or added by an admin |
-| Bridge / tunnel, under bridge | prohibit | whole way / footprint of the overpass |
-| Motorway, roundabout, level crossing | prohibit | whole way / ±10 m |
-| Traffic signal | prohibit | 10 m before the signal (approximation of the "do not hide the signal" rule) |
-| Sign 3.27 | prohibit | from the sign to the next intersection, on that side, continuing across OSM way splits |
-| Marking 1.4 (solid yellow) | prohibit | the drawn extent |
-| OSM `parking:*=no_stopping` | prohibit | that side |
-| Sign 3.28, marking 1.10, OSM `no_parking` | **info** | parking is banned, but a short stop is allowed, so these do *not* turn a curb red |
-| Left curb of a one-way road | info | allowed in built-up areas |
+The rules were checked on 2026-11-12 against the official consolidated text (e-qanun.az framework 3423, including
+amendment 471-VIIQD of 14.07.2026). The full table with quotes, exceptions and v1 → v2 fixes is in
+[docs/LEGAL_VERIFICATION.md](docs/LEGAL_VERIFICATION.md), and the app's **Qaydalar / Rules** button shows the same
+catalog. Summary:
 
-**Legal review needed:** all distances are configured from Art. 52 of the Law "On Road Traffic" as we understand it.
-The legal/product owner must check every entry against the text currently in force. Change the parameters in
-`rules.py` and bump `version` (and `RULESET_VERSION`) so results stay auditable.
+| Effect | Rules |
+|---|---|
+| **RED** (verified prohibition of stopping) | crossing ±5 m (52.IV.4), intersection +5 m from the crossed edge (52.IV.6), 15 m from a bus stop (52.IV.7), bus lane with solid line (48.IV), tunnel, bridge with < 3 lanes, under bridges (52.IV.2), level crossing, motorway, roundabout, blocking a driveway (52.IV.8), bike lane (52.IV.10-1), taxi stand for non-taxis (52.IV.10-2), sign 3.27 zone, 1.4 line **paired with 3.27**, reviewed field observations of other 52.IV clauses |
+| **YELLOW** (can't be decided from the data) | not surveyed, bus lane with unknown line type (dashed lines allow drop-off), bridge with unknown lane count, possible T-junction exception, 1.4 line without a 3.27 sign, traffic-signal visibility (no distance in law), unreviewed observations, conflicting sources |
+| **info** (doesn't restrict stopping) | 3.28 and 1.10 (restrict *durma*, not *dayanma*), dashed bus lane, left side of one-way roads, single row, official AYNA zone |
+
+Vehicle classes: `taxi` (default) and `private`. They differ only where the law gives exemptions, currently taxi stands.
 
 ### Recommendation algorithm
 1. **Candidates:** VERIFIED segments at least 7 m long. The spot on each segment is the point closest to the destination,
@@ -178,27 +175,45 @@ The legal/product owner must check every entry against the text currently in for
 
 ## Data sources & honesty notes
 
-* **OpenStreetMap** (ODbL): about 93 km of curb in a 1.8 × 1.6 km bbox around the 28 May metro. The data includes
-  51 bus stops/platforms, about 400 crossings, 56 signals and 64 ways tagged with bus lanes.
-* **Demo survey area:** on first run the app adds one survey polygon covering the middle 70 % of the area,
-  labelled `demo_seed`. This is what makes curbs green. It stands in for the field survey the team must actually do.
-  Delete it in Admin and draw real surveyed areas.
-* **AYNA zones:** none are pre-loaded, to avoid inventing official data. Add them in Admin with the source URL.
-* **Approximations:** curb lines are drawn by offsetting the road centreline, and widths are estimated from
-  `width`/`lanes` tags or the road type. Rules marked *approximate* are flagged in the UI.
-* **Not covered:** yellow lines and most signs are not in OSM. They must come from a field survey, street imagery
-  or AI Vision, then go through the validation queue.
+| Source | What it gives | Coverage in 28 May (2026-11-12) |
+|---|---|---|
+| OpenStreetMap (ODbL) | roads, crossings, stops, signals, bus/bike lanes | 93 km of curb, 396 crossings, 50 bus stops/platforms, 56 signals, 6.9 km bike lanes. **0 traffic_sign tags, 0 stopping-restriction tags.** |
+| Official / AYNA (ayna.gov.az) | taxi stands, pick-up zones | **No machine-readable dataset found.** Enter zones by hand with their source URL. |
+| Mapillary | detected signs, positions computed from several images | Importer ready (`MAPILLARY_TOKEN`). Coverage **not measured**: no token was available. |
+| Field survey / geotagged photos | signs, markings, survey areas | **0 so far.** Entered in Admin or by GeoJSON import. |
+
+* **Nothing is fabricated.** The v1 demo “survey rectangle” has been retired (marked rejected with a note), so
+  green only comes from real reviewed observations. Synthetic data exists only in `backend/tests/fixtures.py`, is
+  labelled as such, and is never written to the app database.
+* **Camera position ≠ sign position.** EXIF GPS is stored as the *camera* position. The reviewer places the sign
+  where it stands, and approval is refused if a sign sits exactly at the camera position. Mapillary signs use
+  Mapillary's computed position, not a camera location.
+* **Every observation is traceable:** observer, date, source, and a photo / URL / reference are required before it
+  can be verified. Automated sources (OSM, Mapillary, AI) always enter as *pending*. Editing a verified item sends it
+  back to review. Everything is written to the audit log.
+* **Approximations:** curb lines are offsets of the road centreline, road widths are estimated, and crossing width is
+  estimated. Such rules are flagged in the UI.
+
+## Validation workflow (Admin, `#admin`)
+
+1. Add a sign (click where it **stands**), draw a marking / bus lane / taxi stand / other prohibition, or draw a survey area.
+2. Set the road **side** (auto-detected, can be overridden), the zone (to the next intersection, a 7.2.2 length, or a
+   repeated sign with 7.2.3), the line type for bus lanes, or the legal clause for other prohibitions.
+3. Record the source (field survey, street photo, AYNA, Mapillary, AI), observer, date, and a URL or reference. Upload photos.
+4. The review queue shows the photos, the camera-vs-sign position, the impact on curbs, conflicts, and **what is
+   still missing** before the item can be verified. Approve, or reject with a reason.
+5. Imports (OSM tags, Mapillary, GeoJSON) all land in the same queue.
 
 ## Status vs. the technical specification
 
 | Spec item | Status |
 |---|---|
-| OSM integration, curb segmentation, rule engine, red/green/gray, legal explanation (templates) | ✅ |
-| Smart drop-off: candidates, legal filter, direction-aware car route, walk route, crossing safety, ranking, top 3, "no spot" | ✅ |
-| Driver "where can I stop" mode | ✅ (extra) |
-| Data quality: source, timestamps, rule version, conflict detection, validation queue, audit log | ✅ |
-| Admin panel (add / approve / reject / delete; map-matched to way + side) | ✅ |
-| PostgreSQL/PostGIS | ⏳ in-memory Shapely + SQLite for the MVP. The schema maps 1:1 onto the spec's tables, so moving to PostGIS is a storage swap. |
-| Valhalla/GraphHopper | ⏳ own Dijkstra on OSM graphs. This is enough for one district. |
-| AI Vision (sign detection), LLM extraction of AYNA notices | ⏳ not built. Their output plugs into `POST /api/admin/features` with `source=ai_vision` and `status=pending`, so a human always confirms it. |
-| Time-dependent restrictions (sign plates) | ⏳ `time` is accepted by the API but not yet evaluated |
+| OSM integration, curb segmentation, rule engine, three statuses, legal explanation (templates + official quotes) | ✅ |
+| Laws verified against the official text, with a verification level per rule | ✅ [docs/LEGAL_VERIFICATION.md](docs/LEGAL_VERIFICATION.md) |
+| Smart drop-off: legal filter, direction-aware car route, walk route, crossing safety, ranking, top 3, "no spot" | ✅ confirmed (green) and *unverified* (yellow) spots are returned separately, each with status, reasons, sources and confidence |
+| Driver "where can I stop" mode | ✅ |
+| Import pipeline: OSM, Mapillary, GeoJSON, geotagged photos (EXIF) | ✅ (Mapillary needs a token) |
+| Admin: add/edit/move, side, zone, photo evidence, sources, pending/verified/rejected, AI review, audit | ✅ |
+| PostgreSQL/PostGIS | ⏳ **Not used.** The app has always run on SQLite + in-memory Shapely, and still does. Moving to PostGIS is a storage swap (the table layout maps onto the spec's tables). |
+| AI Vision sign detection, LLM extraction of AYNA notices | ⏳ not built. Their output plugs into the same pending queue (`source=ai_vision`). |
+| Time-dependent restrictions | ⏳ plate text is recorded but not evaluated |
