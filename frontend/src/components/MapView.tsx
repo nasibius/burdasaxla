@@ -1,3 +1,4 @@
+import type React from "react";
 import L from "leaflet";
 import { useEffect, useMemo, useRef } from "react";
 import { MapContainer, Marker, Polygon, Polyline, TileLayer, Tooltip, useMap, useMapEvents, CircleMarker } from "react-leaflet";
@@ -178,6 +179,7 @@ export interface MapProps {
   draft?: { kind: string; coords: LngLat[] } | null;
   /** Photo evidence: where the camera was vs. where the sign is (never the same thing). */
   cameraMarks?: { camera: LngLat; target: LngLat; heading?: number | null }[];
+  children?: React.ReactNode;
   highlightFeature?: number | null;
   onMapClick: (c: LngLat) => void;
   onSelectSegment: (id: string, at: LngLat) => void;
@@ -284,6 +286,7 @@ export default function MapView(p: MapProps) {
         {p.draft && !p.draft.kind.startsWith("sign_") && p.draft.coords.map((c, i) => (
           <CircleMarker key={"dp" + i} center={ll(c)} radius={5} pathOptions={{ color: "#fff", weight: 2, fillColor: brand, fillOpacity: 1 }} />
         ))}
+        {p.children}
       </MapContainer>
     </div>
   );

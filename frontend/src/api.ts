@@ -1,6 +1,6 @@
 import type {
   Context, CuratedFeature, Impact, LngLat, Meta, RecResponse, RuleCatalog, SearchItem, Segment, SegFeature,
-  SourcesReport, VehicleClass,
+  SourcesReport, VehicleClass, PlanningResult, ActivityRow, ReviewAction, PlanningItem,
 } from "./types";
 
 const env = (import.meta as any).env ?? {};
@@ -106,6 +106,40 @@ const liveApi = {
     }),
   driverNearest: (origin: LngLat, vehicle: VehicleClass) =>
     req<RecResponse>("/api/driver/nearest-stops", { method: "POST", body: JSON.stringify({ origin, vehicle }) }),
+};
+
+// --------------------------------------------------------------------- B2G planning
+export const planningApi = {
+  /** Same engine output in both modes: live API (threshold adjustable) or the static snapshot (read-only). */
+  plan: async (threshold_m: number): Promise<PlanningResult> => {
+    if (STATIC_MODE) return { ...(await data<PlanningResult>("planning.json")), read_only: true };
+    const [overview, coverage, items] = await Promise.all([
+      req<any>(`/api/authority/overview?threshold_m=${threshold_m}`),
+      req<any>(`/api/authority/coverage?threshold_m=${threshold_m}`),
+      req<{ items: PlanningItem[] }>(`/api/authority/candidates?threshold_m=${threshold_m}`),
+    ]);
+    return {
+      ...overview, coverage: coverage.nodes, read_only: false,
+      survey_tasks: items.items.filter((i) => i.type === "survey_task") as any,
+      candidates: items.items.filter((i) => i.type === "candidate") as any,
+    };
+  },
+  activity: async (): Promise<{ rows: ActivityRow[]; measured: boolean; suppression_threshold: number }> =>
+    STATIC_MODE ? data("activity.json") : req("/api/activity"),
+  review: (token: string, id: string, action: ReviewAction, reviewer: string, reason: string | undefined, threshold_m: number) =>
+    req<{ item: PlanningItem; note: string }>(`/api/authority/candidates/${encodeURIComponent(id)}/review?threshold_m=${threshold_m}`,
+      { method: "POST", body: JSON.stringify({ action, reviewer, reason }), token }),
+  run: (token: string, threshold_m: number) =>
+    req<{ run_id: number }>(`/api/authority/recommendations/run?threshold_m=${threshold_m}`, { method: "POST", token }),
+  setInventory: (token: string, status: "unknown" | "complete", declared_by: string, source_url?: string, note?: string) =>
+    req("/api/authority/inventory", { method: "POST", body: JSON.stringify({ status, declared_by, source_url, note }), token }),
+  adminActivity: (token: string) => req<ActivityRow[]>("/api/admin/activity", { token }),
+  addActivity: (token: string, body: Record<string, unknown>) =>
+    req<ActivityRow>("/api/admin/activity", { method: "POST", body: JSON.stringify(body), token }),
+  reviewActivity: (token: string, id: number, decision: "verified" | "rejected", reviewer: string, review_note?: string) =>
+    req(`/api/admin/activity/${id}/review`, { method: "POST", body: JSON.stringify({ decision, reviewer, review_note }), token }),
+  importActivity: (token: string, csv_text: string, observer: string) =>
+    req<{ created: number; errors: string[] }>("/api/admin/activity/import", { method: "POST", body: JSON.stringify({ csv_text, observer }), token }),
 };
 
 export type NewFeature = Omit<CuratedFeature, "id" | "status" | "evidence" | "impact" | "problems"> & {

@@ -1,16 +1,26 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { STATIC_MODE, api } from "./api";
+import { STATIC_MODE, api, planningApi } from "./api";
 import AdminPanel, { TOOL_GEOM } from "./components/AdminPanel";
 import { IInfo, ILayers, IMap, IMoon, IShield, ISun, IX, Logo } from "./components/Icons";
 import Legend from "./components/Legend";
 import MapView, { type MapResult } from "./components/MapView";
 import Panel from "./components/Panel";
 import RulesPanel from "./components/RulesPanel";
+import PlanningDrawer from "./planning/PlanningDrawer";
+import PlanningLayers, { PlanningLegend } from "./planning/PlanningLayers";
+import PlanningPanel, { type PlanTab, type ReviewFilter } from "./planning/PlanningPanel";
+import PrintReport from "./planning/PrintReport";
+import { makePT } from "./planning/strings";
+import { createPortal } from "react-dom";
 import SegmentDrawer from "./components/SegmentDrawer";
 import { makeT, type Lang } from "./i18n";
 import type {
-  Context, CuratedFeature, FeatureKind, LngLat, Meta, Mode, RecResponse, RuleCatalog, RuleInfo, SearchItem, Segment, SegFeature, VehicleClass,
+  ActivityRow, Context, CuratedFeature, FeatureKind, LngLat, Meta, Mode, PlanningItem, PlanningResult, RecResponse, RuleCatalog, RuleInfo,
+  SearchItem, Segment, SegFeature, VehicleClass,
 } from "./types";
+
+type View = "map" | "planning" | "admin";
+const viewFromHash = (): View => (location.hash === "#admin" ? "admin" : location.hash === "#planning" ? "planning" : "map");
 
 const store = {
   get: (k: string, d: string) => { try { return localStorage.getItem(k) ?? d; } catch { return d; } },
@@ -22,7 +32,7 @@ const DEMO_ORIGIN: LngLat = [49.8436, 40.3757];
 export default function App() {
   const [theme, setTheme] = useState<"dark" | "light">(() => store.get("bs-theme", "dark") as any);
   const [lang, setLang] = useState<Lang>(() => store.get("bs-lang", "az") as Lang);
-  const [view, setView] = useState<"map" | "admin">(() => (location.hash === "#admin" ? "admin" : "map"));
+  const [view, setView] = useState<View>(viewFromHash);
   const t = makeT(lang);
 
   const [meta, setMeta] = useState<Meta | null>(null);
@@ -61,13 +71,23 @@ export default function App() {
   const [cameraMarks, setCameraMarks] = useState<{ camera: LngLat; target: LngLat; heading?: number | null }[]>([]);
   const [highlight, setHighlight] = useState<number | null>(null);
 
+  // B2G planning
+  const [plan, setPlan] = useState<PlanningResult | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
+  const [threshold, setThreshold] = useState(300);
+  const [planTab, setPlanTab] = useState<PlanTab>("tasks");
+  const [planFilter, setPlanFilter] = useState<ReviewFilter>("all");
+  const [planSel, setPlanSel] = useState<string | null>(null);
+  const [activity, setActivity] = useState<ActivityRow[]>([]);
+
   useEffect(() => { document.documentElement.dataset.theme = theme; store.set("bs-theme", theme); }, [theme]);
   useEffect(() => { document.documentElement.lang = lang; store.set("bs-lang", lang); }, [lang]);
   useEffect(() => { store.set("bs-admin", token); }, [token]);
   useEffect(() => { store.set("bs-vehicle", vehicle); }, [vehicle]);
   useEffect(() => { api.rules().then(setCatalog).catch(() => setCatalog(null)); }, []);
   useEffect(() => {
-    const onHash = () => setView(location.hash === "#admin" ? "admin" : "map");
+    const onHash = () => setView(viewFromHash());
     window.addEventListener("hashchange", onHash);
     return () => window.removeEventListener("hashchange", onHash);
   }, []);
@@ -111,13 +131,42 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, destination, origin, maxWalk, version, view, vehicle]);
 
+  useEffect(() => {
+    if (view !== "planning") return;
+    setPlanLoading(true);
+    const h = window.setTimeout(() => {
+      Promise.all([planningApi.plan(threshold), planningApi.activity()])
+        .then(([pl, act]) => { setPlan(pl); setActivity(act.rows); setPlanError(null); })
+        .catch((e) => setPlanError(e.message === "network" ? t("err_network") : e.message))
+        .finally(() => setPlanLoading(false));
+    }, 150);
+    return () => window.clearTimeout(h);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, threshold, version]);
+
+  const planVisible = useMemo<PlanningItem[]>(() => {
+    if (!plan) return [];
+    const base: PlanningItem[] = planTab === "candidates" ? plan.candidates : plan.survey_tasks;
+    return base.filter((i) => planFilter === "all" || (planFilter === "unreviewed" ? !i.review : i.review?.action === planFilter));
+  }, [plan, planTab, planFilter]);
+  const planItem = plan ? [...plan.survey_tasks, ...plan.candidates].find((i) => i.id === planSel) ?? null : null;
+  const selectPlanItem = (id: string) => {
+    setPlanSel(id); setSegDetail(null); setRulesOpen(false);
+    const it = plan ? [...plan.survey_tasks, ...plan.candidates].find((i) => i.id === id) : null;
+    if (it) {
+      const pts: LngLat[] = it.geometry.type === "Polygon" ? it.geometry.coordinates[0] : it.geometry.coordinates;
+      setFit((f) => ({ pts, token: f.token + 1, maxZoom: 18 }));
+    }
+  };
+
   const openSegment = useCallback((id: string, _at?: LngLat) => {
     api.segment(id).then((sg) => { setSegDetail(sg); setRulesOpen(false); }).catch((e) => setError(e.message));
   }, []);
 
   const onMapClick = useCallback((c: LngLat) => {
+    if (pointRequest.current && view !== "map") { pointRequest.current(c); pointRequest.current = null; return; }
+    if (view === "planning") { setSegDetail(null); return; }
     if (view === "admin") {
-      if (pointRequest.current) { pointRequest.current(c); pointRequest.current = null; return; }
       if (!tool || draftDone) return;
       const next = [...draft, c];
       setDraft(next);
@@ -186,15 +235,26 @@ export default function App() {
         onMapClick={onMapClick} onSelectKey={setSelectedKey}
         onSelectSegment={(id, at) => {
           // While placing a point (destination/driver/admin drawing), a click on a curb is a placement, not "open details".
-          if (picking || (view === "admin" && ((tool && !draftDone) || pointRequest.current))) onMapClick(at);
+          if (picking || (view !== "map" && pointRequest.current) || (view === "admin" && tool && !draftDone)) onMapClick(at);
           else openSegment(id);
         }}
         onMoveDestination={(c) => { setDestination(c); setDestLabel(`📍 ${c[1].toFixed(5)}, ${c[0].toFixed(5)}`); }}
         onMoveOrigin={(c) => { setOrigin(c); setOriginLabel(`${c[1].toFixed(5)}, ${c[0].toFixed(5)}`); }}
         onZoom={setZoom} zoom={zoom}
-      />
+      >
+        {view === "planning" && plan && (
+          <PlanningLayers plan={plan} items={planTab === "candidates" ? plan.candidates : [...planVisible, ...plan.candidates]}
+            activity={activity} selectedId={planSel} onSelect={selectPlanItem} lang={lang} zoom={zoom} />
+        )}
+      </MapView>
 
-      {view === "map" ? (
+      {view === "planning" ? (
+        <PlanningPanel lang={lang} plan={plan} loading={planLoading} error={planError} threshold={threshold} setThreshold={setThreshold}
+          tab={planTab} setTab={setPlanTab} filter={planFilter} setFilter={setPlanFilter} visible={planVisible}
+          selectedId={planSel} onSelect={selectPlanItem} activity={activity} token={token}
+          onChanged={() => setVersion((v) => v + 1)} requestPoint={(cb) => { pointRequest.current = cb; }}
+          onPrint={() => window.print()} />
+      ) : view === "map" ? (
         <Panel
           lang={lang} meta={meta} mode={mode} setMode={(m) => { setMode(m); setSegDetail(null); }}
           destLabel={destLabel} setDestLabel={setDestLabel} destination={destination}
@@ -228,9 +288,17 @@ export default function App() {
         <button className="tb-btn" onClick={() => setTheme(theme === "dark" ? "light" : "dark")} aria-label="theme">
           {theme === "dark" ? <ISun size={17} /> : <IMoon size={17} />}
         </button>
-        <button className="tb-btn" onClick={() => { location.hash = view === "admin" ? "" : "#admin"; setSegDetail(null); }}>
-          {view === "admin" ? <IMap size={17} /> : <IShield size={17} />}<span className="lbl">{view === "admin" ? t("map") : t("admin")}</span>
-        </button>
+        <div className="tb-switch glass" role="tablist" aria-label="view">
+          <button role="tab" aria-selected={view === "map"} className={view === "map" ? "on" : ""} onClick={() => { location.hash = ""; setSegDetail(null); }}>
+            <IMap size={15} /><span className="lbl">{makePT(lang)("nav_driver")}</span>
+          </button>
+          <button role="tab" aria-selected={view === "planning"} className={view === "planning" ? "on" : ""} onClick={() => { location.hash = "#planning"; setSegDetail(null); }}>
+            <IInfo size={15} /><span className="lbl">{makePT(lang)("nav_planning")}</span>
+          </button>
+          <button role="tab" aria-selected={view === "admin"} className={view === "admin" ? "on" : ""} onClick={() => { location.hash = "#admin"; setSegDetail(null); }}>
+            <IShield size={15} /><span className="lbl">{t("admin")}</span>
+          </button>
+        </div>
       </div>
 
       {layersOpen && (
@@ -250,7 +318,15 @@ export default function App() {
         </div>
       )}
 
-      {!segDetail && !rulesOpen && <Legend meta={meta} lang={lang} theme={theme} showRoutes={results.length > 0} />}
+      {!segDetail && !rulesOpen && !(view === "planning" && planItem) && (view === "planning"
+        ? <PlanningLegend lang={lang} />
+        : <Legend meta={meta} lang={lang} theme={theme} showRoutes={results.length > 0} />)}
+      {view === "planning" && planItem && plan && !segDetail && (
+        <PlanningDrawer item={planItem} plan={plan} lang={lang} token={token} threshold={threshold}
+          onClose={() => setPlanSel(null)} onChanged={() => setVersion((v) => v + 1)} onOpenSegment={openSegment} />
+      )}
+      {/* Always mounted in the planning view; only visible under @media print (see styles.css). */}
+      {view === "planning" && plan && createPortal(<PrintReport plan={plan} items={planVisible} lang={lang} />, document.body)}
       {segDetail && <SegmentDrawer seg={segDetail} lang={lang} onClose={() => setSegDetail(null)} rules={rulesById} law={catalog?.law} vehicle={vehicle} />}
       {rulesOpen && !segDetail && catalog && <RulesPanel catalog={catalog} lang={lang} onClose={() => setRulesOpen(false)} />}
     </div>

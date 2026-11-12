@@ -212,3 +212,114 @@ export interface SourcesReport {
   official_ayna_dataset: string;
   mapillary: { configured: boolean };
 }
+
+// ------------------------------------------------------------------ B2G planning
+export type CoverageState = "SERVED" | "POTENTIAL_COVERAGE_GAP" | "INVENTORY_UNKNOWN" | "NETWORK_UNRELIABLE";
+export type ReviewAction = "needs_survey" | "shortlist" | "reject" | "more_data";
+
+export interface PlanningReview { id?: number; target_id: string; action: ReviewAction; reason?: string | null; reviewer: string; reviewed_at: string }
+
+export interface CoverageNode {
+  id: string; lon: number; lat: number; kind: string; name: string; transit_hub: boolean; is_proxy: true;
+  state: CoverageState; distance_m: number | null; threshold_m: number; reason: string; nearest_supply?: string | null;
+}
+
+interface PlanningItemBase {
+  id: string;
+  rank: number | null;
+  geometry: { type: "Polygon" | "LineString"; coordinates: any };
+  why: string;
+  missing_evidence: string[];
+  factors: Record<string, number | null>;
+  factors_missing: string[];
+  officially_approved: false;
+  review?: PlanningReview | null;
+  review_history?: PlanningReview[];
+}
+
+export interface SurveyTask extends PlanningItemBase {
+  type: "survey_task";
+  cell: [number, number];
+  centroid: LngLat;
+  priority_score: number | null;
+  access_nodes: number;
+  access_nodes_are_proxy: true;
+  access_kinds: Record<string, number>;
+  transit_hubs: string[];
+  coverage_states: Partial<Record<CoverageState, number>>;
+  measured_activity: "not_measured" | { rows: number; per_hour: number };
+  curb_m: { total: number; unverified: number; prohibited: number; allowed: number };
+  curb_segments_to_survey: { segment_id: string; street: string; compass: string; length_m: number; cautions: string[] }[];
+  no_defensible_candidate?: boolean;
+}
+
+export interface Candidate extends PlanningItemBase {
+  type: "candidate";
+  segment_id: string;
+  candidate_class: "SCREENED_FOR_FURTHER_STUDY" | "DATA_COLLECTION_NEEDED";
+  point: LngLat;
+  street: string;
+  road_side: string;
+  compass: string;
+  length_m: number;
+  current_legal_status: Status;
+  coverage_finding: CoverageState;
+  measured_taxi_demand_available: boolean;
+  walk_distance_to_gap_m: number;
+  current_avg_walk_to_verified_m: number;
+  score: number | null;
+  cluster: string;
+  requires: string[];
+  exclusions_in_cluster: Record<string, number> | null;
+}
+
+export type PlanningItem = SurveyTask | Candidate;
+
+export interface SupplyPoint { segment_id: string; type: "official_designated" | "field_verified_suitable"; point: LngLat; street: string; side: string; verified_at?: string | null }
+
+export interface PlanningResult {
+  algorithm_version: string;
+  generated_at: string;
+  parameters: { threshold_m: number; cell_m: number; survey_weights: Record<string, number>; candidate_weights: Record<string, number> };
+  area: { id: string; name?: string; inventory_status: "unknown" | "complete"; inventory_source_url?: string | null;
+    inventory_declared_by?: string | null; inventory_declared_at?: string | null; polygon?: any };
+  source_versions: { osm_snapshot: string; model_built_at: string; ruleset: string; verified_observations: number; measured_activity_rows: number };
+  inventory_complete: boolean;
+  demand_measured: boolean;
+  summary: {
+    verified_supply_locations: number;
+    verified_supply_by_type: { official_designated: number; field_verified_suitable: number };
+    access_nodes: number;
+    coverage_states: Record<CoverageState, number>;
+    survey_tasks: number;
+    candidates: { SCREENED_FOR_FURTHER_STUDY: number; DATA_COLLECTION_NEEDED: number };
+    measured_activity_rows: number;
+    served_share: number | null;
+  };
+  supply: SupplyPoint[];
+  observed_suitable: SupplyPoint[];
+  coverage: CoverageNode[];
+  survey_tasks: SurveyTask[];
+  candidates: Candidate[];
+  limitations: string[];
+  read_only?: boolean;
+  run_id?: number;
+}
+
+export interface ActivityRow {
+  id: number;
+  place_name: string;
+  geometry: { type: "Point"; coordinates: LngLat };
+  period_start: string;
+  period_end: string;
+  pickups: number | string;
+  dropoffs: number | string;
+  per_hour: number | null;
+  vehicle_scope: string;
+  method: "field_count" | "operator_aggregate" | "official_statistic";
+  source: string;
+  source_url?: string | null;
+  verified_at?: string | null;
+  status?: string;
+  observer?: string;
+}

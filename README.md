@@ -45,6 +45,18 @@ http://localhost:8000.
 * Basemap: Esri Canvas tiles by default (no key needed). To use CARTO or MapTiler with your own key, set
   `VITE_TILE_DARK` / `VITE_TILE_LIGHT` (and optionally `VITE_TILE_LABELS_*`).
 
+## Two journeys: driver and AYNA planning
+
+| | Driver view (default) | **AYNA Planning** (`#planning`) |
+|---|---|---|
+| Question | Where may I stop **today**? | Where should **new official zones** be investigated? |
+| Output | confirmed (green) spots + separately labelled unverified options | field-survey tasks; candidate sites only for supported gaps |
+| Legal effect | based on verified law and observations | **none**: proposals are never legal permissions and never appear in driver results |
+
+The planning view also holds the **passenger boarding/alighting table** (`passenger_activity`: measured counts of
+people getting in and out, by place). Method, data coverage, API and P0 status are in
+**[docs/B2G_PLANNING.md](docs/B2G_PLANNING.md)**. The pre-work audit is in [docs/feature_audit.md](docs/feature_audit.md).
+
 ## Hosting
 
 There are two ways to run it:
