@@ -31,6 +31,7 @@ jobs:
         working-directory: frontend
         env:
           VITE_STATIC: "1"
+          VITE_ADMIN_URL: https://burdasaxla.onrender.com/#admin
           VITE_BASE: /${{ github.event.repository.name }}/
         run: |
           npm ci

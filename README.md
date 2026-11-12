@@ -251,3 +251,10 @@ observations and their evidence live on the persistent disk. Override with
 `BURDASAXLA_EVIDENCE_DIR` only when an existing deployment uses another mounted
 location. Migrate old photos into the configured directory before switching an
 existing deployment; SQLite records refer to their stored filenames.
+
+The GitHub Pages **Admin** button opens the full backend at
+https://burdasaxla.onrender.com/#admin. The Pages workflow supplies
+`VITE_ADMIN_URL`; direct `#admin` bookmarks also show a link to that login.
+Admin credentials are never included in the static build. Backend builds keep their
+local admin navigation. Retrieve the admin token privately in Render's service
+Environment settings (`BURDASAXLA_ADMIN_TOKEN`).

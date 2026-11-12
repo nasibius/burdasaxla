@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { STATIC_MODE, api, type NewFeature } from "../api";
+import { ADMIN_URL, STATIC_MODE, api, type NewFeature } from "../api";
 import type { CuratedFeature, FeatureKind, FeatureSource, Impact, LngLat, SourcesReport } from "../types";
 import { makeT, type Lang } from "../i18n";
 import { IAlert, ICheck, IExternal, IMap, IShield, ITrash, IX, Logo } from "./Icons";
@@ -289,7 +289,9 @@ export default function AdminPanel(p: Props) {
       </div>
       <div className="panel-body">
         {STATIC_MODE ? (
-          <div className="static-note">{t("static_admin")}</div>
+          <div className="static-note">{t("static_admin")}
+            {ADMIN_URL && <p><a className="btn-primary" href={ADMIN_URL}>{p.lang === "az" ? "Canlı admin panelini aç" : "Open live admin"}</a></p>}
+          </div>
         ) : !authed ? (
           <form onSubmit={(e) => { e.preventDefault(); p.setToken(tokenInput); load(tokenInput); }}>
             <div className="field-label"><span>{t("admin_token")}</span></div>
