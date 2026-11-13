@@ -18,12 +18,26 @@ export interface Activity {
   period_start: string; period_end: string; source_ref: string; source_url: string;
   license: string; collection_method: string; passengers_per_hour: number;
   longitude: number; latitude: number;
+  /** Demo-mode row with invented counts (BURDASAXLA_DEMO_SURVEY). Never measured data. */
+  is_synthetic_example?: boolean;
 }
 /** One analysed access point. Always a geographic proxy (OSM place), never measured demand. */
 export interface CoverageNode {
   id: string; name: string; geometry: { type: 'Point'; coordinates: LngLat }; is_proxy: true;
   source_url: string; state: 'SERVED' | 'POTENTIAL_COVERAGE_GAP' | 'INVENTORY_UNKNOWN' | 'NETWORK_UNRELIABLE';
   distance_m: number | null; reason: string;
+}
+/** Area with many unmet drop-off/pick-up requests and no legal stopping place nearby. */
+export interface DemandHotspot {
+  id: string; center: LngLat; place: string | null; requests: number; unmet: number; unmet_share: number | null;
+  nearest_legal_m: number | null; first_seen: string | null; last_seen: string | null; is_synthetic_example: boolean;
+  recommendation: 'build_new_stopping_place' | 'no_usable_curb_nearby';
+  suggested_site: null | { segment_id: string; name: string; side: string; compass?: string; length_m: number;
+    distance_m: number; current_status: string; simulated_green: boolean; cautions: string[]; geometry: LngLat[] };
+}
+export interface DemandReport {
+  generated_at: string; vehicle: string; min_unmet: number; legal_radius_m: number; site_radius_m: number;
+  logged_requests: number; logged_cells: number; demo: boolean; hotspots: DemandHotspot[]; method: string;
 }
 export interface PlanningSnapshot {
   area: { id: string; name: string; geometry: { type: 'Polygon'; coordinates: LngLat[][] } };
@@ -61,6 +75,12 @@ export const planningApi = {
     request(`candidates/${encodeURIComponent(candidate.candidate_id)}/review?threshold_m=${threshold}`, token,
       { action, reason, run_id: candidate.run_id }),
   importActivity: (body: unknown, token: string) => request('passenger-activity', token, body),
+  demand: async (): Promise<DemandReport> => {
+    if (!STATIC_MODE) return request('demand');
+    const response = await fetch(`${env.BASE_URL}static-data/demand.json`);
+    if (!response.ok) throw new Error(`Demand report unavailable (${response.status})`);
+    return response.json();
+  },
 };
 export const exportColumns = ['candidate_id', 'name', 'road_side', 'candidate_class', 'review_status', 'coverage_finding',
   'score', 'rank', 'officially_approved', 'current_legal_status', 'length_m', 'evidence_strength', 'last_verified',

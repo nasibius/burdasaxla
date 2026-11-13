@@ -39,3 +39,17 @@ def test_planning_ignores_simulated_green(monkeypatch):
     snap = build_snapshot(demo_model, [])
     assert snap["summary"]["observed_usable_curb_segments"] == 0
     assert len(snap["candidates"]) == len(plain["candidates"])
+
+
+def test_demo_passenger_activity_is_labelled_and_not_measured(monkeypatch):
+    raw = main_street()
+    model = CityModel(raw, [])
+    monkeypatch.delenv("BURDASAXLA_DEMO_SURVEY", raising=False)
+    assert demo.demo_activity(model) == []
+    monkeypatch.setenv("BURDASAXLA_DEMO_SURVEY", "1")
+    model.search_items = [{"name": "Synthetic mall", "kind": "mall", "lat": 40.38, "lon": 49.85, "alt": []}]
+    rows = demo.demo_activity(model)
+    assert rows and all(r["is_synthetic_example"] and r["source_ref"] == "SIMULATED EXAMPLE" for r in rows)
+    snap = build_snapshot(model, [], passenger_activity=rows)
+    assert snap["simulated_passenger_activity_rows"] == len(rows)
+    assert snap["measured_passenger_activity_available"] is False

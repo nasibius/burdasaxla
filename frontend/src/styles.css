@@ -474,3 +474,7 @@ a:hover { text-decoration: underline; }
 .rec-body { margin-top: 8px; display: grid; gap: 6px; font-size: 12px; line-height: 1.4; }
 .rec-review { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; }
 .rec-review .btn-primary { flex: 1 0 100%; }
+.rec-st.build { background: var(--ok-soft); color: var(--ok); }
+.rec-suggest { padding: 8px 10px; border-radius: 10px; background: var(--ok-soft); display: grid; gap: 3px; }
+.authority-table-wrap tr.sim-row td { background: rgba(124, 58, 237, .07); }
+.authority-activity .banner.sim { margin: 10px 0; }

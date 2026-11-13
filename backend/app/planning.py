@@ -163,7 +163,10 @@ def build_snapshot(model, features, *, passenger_activity=None, reviews=None, th
         "verified_locations": [{k: f.get(k) for k in ("id", "geometry", "source_url", "verified_at", "source")}
                                for f in official],
         "coverage": coverage, "candidates": candidates, "exclusions": excluded,
-        "passenger_activity": activity, "measured_passenger_activity_available": bool(activity),
+        # Simulated demo rows are shown (labelled) but never count as measured activity.
+        "passenger_activity": activity,
+        "measured_passenger_activity_available": any(not r.get("is_synthetic_example") for r in activity),
+        "simulated_passenger_activity_rows": sum(1 for r in activity if r.get("is_synthetic_example")),
         "passenger_activity_version": digest(activity),
         "empty_reason": None if candidates else "No defensible candidate found. Request an area inventory survey.",
     }
