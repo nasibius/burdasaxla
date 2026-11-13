@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from shapely.geometry import Point, box
 
 from . import config as C
+from . import demo
 from .planning import AREA_ID, build_snapshot, export_candidates, filtered_candidates
 from .planning_store import PlanningStore
 
@@ -86,7 +87,8 @@ def router_for(state, get_model, authenticate):
         st = store()
         city = get_model()
         return build_snapshot(city, city.features,
-                              passenger_activity=st.activity(), reviews=st.reviews(public=True), threshold_m=threshold_m,
+                              passenger_activity=st.activity() + demo.demo_activity(city),
+                              reviews=st.reviews(public=True), threshold_m=threshold_m,
                               code_revision=os.environ.get("BURDASAXLA_CODE_REVISION", "unknown"))
 
     @router.get("/overview")

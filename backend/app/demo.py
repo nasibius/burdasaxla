@@ -30,3 +30,42 @@ def demo_survey(bbox, share=0.85):
 
 def with_demo(features, bbox):
     return [*features, demo_survey(bbox)] if enabled() else list(features)
+
+
+# --- SIMULATED EXAMPLE passenger activity (boarding/alighting table) -------------------------------
+ACTIVITY_KINDS = {"platform": 9, "station": 9, "mall": 7, "hotel": 5, "university": 6, "supermarket": 4,
+                  "bank": 3, "government": 3, "hospital": 5, "theatre": 4, "museum": 3}
+PERIOD = ("2026-11-02T00:00:00Z", "2026-11-09T00:00:00Z")  # one example week (168 h)
+
+
+def demo_activity(model, limit=12):
+    """Invented weekly boarding/alighting counts at real OSM places. Never stored; every row is labelled."""
+    import hashlib
+
+    if not enabled():
+        return []
+    picks = sorted((it for it in model.search_items if it.get("kind") in ACTIVITY_KINDS),
+                   key=lambda it: (-ACTIVITY_KINDS[it["kind"]], hashlib.sha1(it["name"].encode()).hexdigest()))
+    rows, names, per_kind = [], set(), {}
+    for it in picks:
+        cap = 4 if it["kind"] in ("platform", "station") else 2
+        if it["name"] in names or per_kind.get(it["kind"], 0) >= cap:
+            continue
+        names.add(it["name"])
+        per_kind[it["kind"]] = per_kind.get(it["kind"], 0) + 1
+        h = int(hashlib.sha1(it["name"].encode()).hexdigest(), 16)
+        weight = ACTIVITY_KINDS[it["kind"]]
+        pickups = 150 * weight + h % 120
+        dropoffs = 150 * weight + (h // 997) % 120
+        rows.append({
+            "id": -(len(rows) + 1), "location_id": f"sim-{h % 10**8:08d}", "name": it["name"],
+            "pickups": pickups, "dropoffs": dropoffs, "period_start": PERIOD[0], "period_end": PERIOD[1],
+            "passengers_per_hour": round((pickups + dropoffs) / 168, 3), "unit": "passenger movements",
+            "source_ref": "SIMULATED EXAMPLE",
+            "source_url": f"https://www.openstreetmap.org/#map=19/{it['lat']:.5f}/{it['lon']:.5f}",
+            "license": "Simulated demo data — not real counts", "collection_method": "Simulated example (demo mode)",
+            "longitude": it["lon"], "latitude": it["lat"], "publication_permitted": True, "is_synthetic_example": True,
+        })
+        if len(rows) == limit:
+            break
+    return sorted(rows, key=lambda r: (-r["passengers_per_hour"], r["location_id"]))

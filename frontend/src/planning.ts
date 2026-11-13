@@ -18,6 +18,8 @@ export interface Activity {
   period_start: string; period_end: string; source_ref: string; source_url: string;
   license: string; collection_method: string; passengers_per_hour: number;
   longitude: number; latitude: number;
+  /** Demo-mode row with invented counts (BURDASAXLA_DEMO_SURVEY). Never measured data. */
+  is_synthetic_example?: boolean;
 }
 /** One analysed access point. Always a geographic proxy (OSM place), never measured demand. */
 export interface CoverageNode {

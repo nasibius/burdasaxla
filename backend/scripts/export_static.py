@@ -18,8 +18,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from app import config as C  # noqa: E402
 from app.citymodel import CityModel, load_raw  # noqa: E402
 from app.demand import DemandStore, report  # noqa: E402
+from app.demo import demo_activity, with_demo  # noqa: E402
 from app.demo import enabled as demo_enabled  # noqa: E402
-from app.demo import with_demo  # noqa: E402
 from app.planning import build_snapshot  # noqa: E402
 from app.planning_store import PlanningStore  # noqa: E402
 from app.rules import ruleset  # noqa: E402
@@ -43,7 +43,7 @@ def main():
             ["git", "status", "--porcelain"], cwd=C.BASE_DIR.parent, text=True).strip():
         revision += "-dirty"
     planning_store = PlanningStore(C.DB_PATH)
-    planning = build_snapshot(m, features, passenger_activity=planning_store.activity(),
+    planning = build_snapshot(m, features, passenger_activity=planning_store.activity() + demo_activity(m),
                               reviews=planning_store.reviews(public=True), code_revision=revision)
     s, w, n, e = m.bbox
     meta = {"area": "28 May, Bakı", "bbox": m.bbox, "center": [(w + e) / 2, (s + n) / 2],
